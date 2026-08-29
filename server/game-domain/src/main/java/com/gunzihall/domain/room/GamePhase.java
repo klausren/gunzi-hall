@@ -27,6 +27,14 @@ public enum GamePhase {
         if (target == this) {
             return true;
         }
+        // Sprint 3 多局循环：结算完直接开新局；出锅/整轮结束后重新开局
+        if (target == DEALING && (this == SETTLING || this == ROUND_OVER)) {
+            return true;
+        }
+        // 首局（或上局无血）没有进贡环节，亮主确认后跳过 TRIBUTE 直接扣底
+        if (target == BURYING && this == BIDDING) {
+            return true;
+        }
         return target.ordinal() == this.ordinal() + 1;
     }
 }

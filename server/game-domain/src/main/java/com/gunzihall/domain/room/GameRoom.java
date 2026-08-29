@@ -4,14 +4,19 @@ import com.gunzihall.domain.action.CommandResult;
 import com.gunzihall.domain.action.GameCommand;
 import com.gunzihall.domain.card.Card;
 import com.gunzihall.domain.play.FollowRule;
+import com.gunzihall.domain.play.RoundSettlement;
 import com.gunzihall.domain.play.Trick;
 import com.gunzihall.domain.player.Player;
 import com.gunzihall.domain.player.Seat;
 import com.gunzihall.domain.player.Team;
+import com.gunzihall.domain.tribute.TributeCalculator;
+import com.gunzihall.domain.tribute.TributeObligation;
 import com.gunzihall.domain.trump.TrumpContext;
+import com.gunzihall.domain.trump.TrumpReveal;
 
 import java.util.Collections;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -44,6 +49,32 @@ public final class GameRoom {
     private final Map<Team, Integer> trickPoints = new EnumMap<>(Team.class);
     /** 最后一圈赢家所在队伍（结算抠底/保底用） */
     private Team lastTrickWinnerTeam;
+
+    // ---- Sprint 3：多局推进状态（手册 2.2/2.3/5 节） ----
+    /** 当前轮次所打级数（3..10，出锅后回到 3） */
+    private int currentLevel = 3;
+    /** 是否本轮第一局（第一局抢亮大王定庄 / 翻底牌定庄，手册 2.2） */
+    private boolean firstRound = true;
+    /** 庄家座位（第一局由亮主产生，之后由上局结算决定） */
+    private Seat bankerSeat;
+    /** 当前最高亮主声明（抢亮/反主，手册 2.2） */
+    private TrumpReveal revealState;
+    /** 庄家是否已把底牌收入手牌（BURYING 阶段一次性动作） */
+    private boolean bottomTaken;
+    /** 本局是否干锅（底牌无主花色普通牌；干锅局底牌王不算血不追加升级，手册 2.3.7） */
+    private boolean dryPot;
+    /** 局数（从 1 计） */
+    private int gameNumber = 1;
+    /** 本局待执行的进贡义务（payer 座位 → 血数与收贡人；由上局结算产出） */
+    private final Map<Seat, TributeObligation> pendingTributes = new EnumMap<>(Seat.class);
+    /** 已收到的进贡牌（payer 座位 → 贡牌，等还贡） */
+    private final Map<Seat, List<Card>> tributeReceived = new EnumMap<>(Seat.class);
+    /** 已完成还贡的 payer 座位 */
+    private final EnumSet<Seat> tributeReturned = EnumSet.noneOf(Seat.class);
+    /** 最近一次一局结算结果（SettleRoundCommand 产出） */
+    private RoundSettlement.Result lastSettlement;
+    /** 最近一次进贡血数计算结果 */
+    private TributeCalculator.TributeResult lastTributeResult;
 
     public GameRoom(long roomId) {
         this.roomId = roomId;
@@ -200,5 +231,131 @@ public final class GameRoom {
     public boolean allHandsEmpty() {
         return !players.isEmpty()
                 && players.values().stream().allMatch(p -> p.hand().isEmpty());
+    }
+
+    // ---- Sprint 3：多局推进状态访问/变更 ----
+
+    public int currentLevel() {
+        return currentLevel;
+    }
+
+    public void setCurrentLevel(int currentLevel) {
+        this.currentLevel = currentLevel;
+    }
+
+    public boolean isFirstRound() {
+        return firstRound;
+    }
+
+    public void setFirstRound(boolean firstRound) {
+        this.firstRound = firstRound;
+    }
+
+    public Optional<Seat> bankerSeat() {
+        return Optional.ofNullable(bankerSeat);
+    }
+
+    public void setBankerSeat(Seat bankerSeat) {
+        this.bankerSeat = bankerSeat;
+    }
+
+    public Optional<TrumpReveal> revealState() {
+        return Optional.ofNullable(revealState);
+    }
+
+    public void setRevealState(TrumpReveal revealState) {
+        this.revealState = revealState;
+    }
+
+    public boolean isBottomTaken() {
+        return bottomTaken;
+    }
+
+    public void setBottomTaken(boolean bottomTaken) {
+        this.bottomTaken = bottomTaken;
+    }
+
+    public boolean isDryPot() {
+        return dryPot;
+    }
+
+    public void setDryPot(boolean dryPot) {
+        this.dryPot = dryPot;
+    }
+
+    public int gameNumber() {
+        return gameNumber;
+    }
+
+    public void setGameNumber(int gameNumber) {
+        this.gameNumber = gameNumber;
+    }
+
+    public Map<Seat, TributeObligation> pendingTributes() {
+        return Collections.unmodifiableMap(pendingTributes);
+    }
+
+    public void putTributeObligation(Seat payer, TributeObligation obligation) {
+        pendingTributes.put(payer, obligation);
+    }
+
+    public void clearTributeObligations() {
+        pendingTributes.clear();
+    }
+
+    public Map<Seat, List<Card>> tributeReceived() {
+        return Collections.unmodifiableMap(tributeReceived);
+    }
+
+    /** 记录一笔已收进贡（payer → 贡牌），并移除其义务 */
+    public void recordTribute(Seat payer, List<Card> cards) {
+        tributeReceived.put(payer, List.copyOf(cards));
+        pendingTributes.remove(payer);
+    }
+
+    public boolean isTributeReturned(Seat payer) {
+        return tributeReturned.contains(payer);
+    }
+
+    public void markTributeReturned(Seat payer) {
+        tributeReturned.add(payer);
+    }
+
+    /** 全部进贡是否均已还贡（TRIBUTE → BURYING 的切换条件） */
+    public boolean allTributesReturned() {
+        return !tributeReceived.isEmpty()
+                && tributeReceived.keySet().stream().allMatch(tributeReturned::contains);
+    }
+
+    public Optional<RoundSettlement.Result> lastSettlement() {
+        return Optional.ofNullable(lastSettlement);
+    }
+
+    public void setLastSettlement(RoundSettlement.Result lastSettlement) {
+        this.lastSettlement = lastSettlement;
+    }
+
+    public Optional<TributeCalculator.TributeResult> lastTributeResult() {
+        return Optional.ofNullable(lastTributeResult);
+    }
+
+    public void setLastTributeResult(TributeCalculator.TributeResult lastTributeResult) {
+        this.lastTributeResult = lastTributeResult;
+    }
+
+    /** 开新局前清空局内流水状态（手牌/底牌由 ShuffleAndDealCommand 重发） */
+    public void resetRoundState() {
+        currentTrick = null;
+        turnSeat = null;
+        trickPoints.clear();
+        lastTrickWinnerTeam = null;
+        trump = null;
+        bottomCards = List.of();
+        revealState = null;
+        bottomTaken = false;
+        dryPot = false;
+        pendingTributes.clear();
+        tributeReceived.clear();
+        tributeReturned.clear();
     }
 }
