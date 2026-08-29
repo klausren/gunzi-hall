@@ -4,9 +4,11 @@ import com.gunzihall.domain.action.CommandResult;
 import com.gunzihall.domain.action.PlayCardsCommand;
 import com.gunzihall.domain.action.ShuffleAndDealCommand;
 import com.gunzihall.domain.card.Card;
+import com.gunzihall.domain.card.Suit;
 import com.gunzihall.domain.player.HumanPlayer;
 import com.gunzihall.domain.player.Player;
 import com.gunzihall.domain.player.Seat;
+import com.gunzihall.domain.trump.TrumpContext;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -97,6 +99,8 @@ class GameRoomCommandFlowTest {
         room.transitionTo(GamePhase.TRIBUTE);
         room.transitionTo(GamePhase.BURYING);
         room.transitionTo(GamePhase.PLAYING);
+        room.setTrump(new TrumpContext(5, Suit.SPADE));
+        room.setTurnSeat(Seat.NORTH);
 
         Player north = room.playerAt(Seat.NORTH);
         Card first = north.hand().get(0);

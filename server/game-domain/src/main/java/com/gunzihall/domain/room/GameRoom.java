@@ -3,8 +3,11 @@ package com.gunzihall.domain.room;
 import com.gunzihall.domain.action.CommandResult;
 import com.gunzihall.domain.action.GameCommand;
 import com.gunzihall.domain.card.Card;
+import com.gunzihall.domain.play.FollowRule;
+import com.gunzihall.domain.play.Trick;
 import com.gunzihall.domain.player.Player;
 import com.gunzihall.domain.player.Seat;
+import com.gunzihall.domain.player.Team;
 import com.gunzihall.domain.trump.TrumpContext;
 
 import java.util.Collections;
@@ -29,6 +32,18 @@ public final class GameRoom {
     private TrumpContext trump;
     private final com.gunzihall.domain.action.CommandHistory history =
             new com.gunzihall.domain.action.CommandHistory();
+
+    // ---- Sprint 2：出牌阶段状态 ----
+    /** 跟牌模式（Q3 已拍板：默认活棒，房主建房时可切换） */
+    private FollowRule followRule = FollowRule.defaultValue();
+    /** 当前圈（null = 下一手是首出） */
+    private Trick currentTrick;
+    /** 当前轮到谁出牌（PLAYING 阶段必填，由扣底结束/上一圈赢家设定） */
+    private Seat turnSeat;
+    /** 两队出牌阶段已收走的分牌 */
+    private final Map<Team, Integer> trickPoints = new EnumMap<>(Team.class);
+    /** 最后一圈赢家所在队伍（结算抠底/保底用） */
+    private Team lastTrickWinnerTeam;
 
     public GameRoom(long roomId) {
         this.roomId = roomId;
@@ -125,5 +140,65 @@ public final class GameRoom {
 
     public com.gunzihall.domain.action.CommandHistory history() {
         return history;
+    }
+
+    // ---- Sprint 2：出牌阶段状态访问/变更 ----
+
+    /** 跟牌模式（活棒/死棒房间开关，Q3） */
+    public FollowRule followRule() {
+        return followRule;
+    }
+
+    public void setFollowRule(FollowRule followRule) {
+        this.followRule = followRule;
+    }
+
+    /** 当前圈；null 表示下一手为首出 */
+    public Optional<Trick> currentTrick() {
+        return Optional.ofNullable(currentTrick);
+    }
+
+    public void setCurrentTrick(Trick trick) {
+        this.currentTrick = trick;
+    }
+
+    public void clearCurrentTrick() {
+        this.currentTrick = null;
+    }
+
+    /** 当前轮到的座位；未开始出牌为 empty */
+    public Optional<Seat> turnSeat() {
+        return Optional.ofNullable(turnSeat);
+    }
+
+    public void setTurnSeat(Seat seat) {
+        this.turnSeat = seat;
+    }
+
+    /** 两队出牌阶段已收分（只读视图） */
+    public Map<Team, Integer> trickPoints() {
+        return Collections.unmodifiableMap(trickPoints);
+    }
+
+    public void addTrickPoints(Team team, int points) {
+        trickPoints.merge(team, points, Integer::sum);
+    }
+
+    public void clearTrickPoints() {
+        trickPoints.clear();
+    }
+
+    public Optional<Team> lastTrickWinnerTeam() {
+        return Optional.ofNullable(lastTrickWinnerTeam);
+    }
+
+    public void setLastTrickWinnerTeam(Team team) {
+        this.lastTrickWinnerTeam = team;
+    }
+
+    /** 全员手牌是否打空（PLAYING → SETTLING 的切换条件） */
+    public boolean allHandsEmpty() {
+        return !players.isEmpty()
+                && players.values().stream().allMatch(p -> p.hand().isEmpty());
     }
 }
