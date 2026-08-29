@@ -27,7 +27,19 @@
 00-项目说明/    架构设计、WBS 任务分解
 01-规则手册/    游戏规则（已定稿冻结）
 02-设计文档/    UML 图集（功能全景/架构/类图/状态机/时序/进度甘特）
+server/         后端工程（Maven 多模块，Sprint 1 起）
 ```
+
+## 后端构建（server/）
+
+```bash
+cd server
+mvn test   # JDK 17 + Maven 3.9+，36 个单元测试
+```
+
+当前模块：`game-domain` —— 领域模型（牌/牌值比较器/发牌/命令模式/计分/进贡血数），
+唯一规则依据为已冻结的规则手册 v1.1。后续模块按 WBS 陆续加入：
+`game-room`（Netty 战斗服）、`game-account`、`game-ai`、`game-common`。
 
 ## 📊 项目图集（甲方可直达）
 
