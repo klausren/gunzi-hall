@@ -6,16 +6,14 @@ import { cardFace, createCardNode, drawCardBg, SUIT_OPTIONS } from './CardUI';
 const { ccclass, property } = _decorator;
 
 /**
- * 牌桌主控（T-602/T-603/T-604）：快照驱动渲染 + 阶段操作按钮。
+ * 牌桌主控（T-602/603/604）。设计分辨率：1280×720（屏幕半高 360）。
  *
- * 布局（750×1334 设计分辨率，中心原点）：
- *   顶部  y≈560  信息栏（局/阶段/级数/主牌/庄家/轮到/捡分）
- *   中部  y≈0    当前墩（四家出牌）
- *   下部  y≈-360 操作按钮区（随阶段变化）
- *   底部  y≈-520 我的手牌（点击选中弹起）
+ *   顶部  y≈300  信息栏（局/阶段/级数/主牌/庄家/轮到/捡分）
+ *   中部  y≈100  当前墩（四家出牌 + 座位铭牌）
+ *   下部  y≈-150 操作按钮区
+ *   底部  y≈-280 我的手牌（点击选中弹起）
  *
- * 渲染策略（T-603 初版）：全量快照驱动重建（39 节点级重建，微信真机足够流畅；
- * 后续量大再改差量）。
+ * 渲染策略（T-603 初版）：全量快照驱动重建（39 节点级，差量留后续优化）。
  */
 @ccclass('TableUI')
 export class TableUI extends Component {
@@ -27,7 +25,7 @@ export class TableUI extends Component {
 
     private net: NetClient | null = null;
     private snap: SnapshotMsgDown | null = null;
-    private selected = new Set<number>();   // 手牌下标（三副牌有重复，按下标选）
+    private selected = new Set<number>();   // 手牌下标
 
     private topLabel!: Label;
     private toastLabel!: Label;
@@ -35,11 +33,12 @@ export class TableUI extends Component {
     private handNode!: Node;
     private btnNode!: Node;
 
+    // 设计分辨率 1280×720 内的布局常量
     private static readonly SEAT_POS: Record<SeatName, Vec3> = {
-        NORTH: new Vec3(0, 150, 0),
-        SOUTH: new Vec3(0, -120, 0),
-        WEST: new Vec3(-260, 15, 0),
-        EAST: new Vec3(260, 15, 0),
+        NORTH: new Vec3(0, 180, 0),
+        SOUTH: new Vec3(0, -80, 0),
+        WEST: new Vec3(-420, 50, 0),
+        EAST: new Vec3(420, 50, 0),
     };
 
     private static readonly PHASE_TEXT: Record<string, string> = {
@@ -65,53 +64,65 @@ export class TableUI extends Component {
     // ==================== 布局骨架 ====================
 
     private buildLayout(): void {
-        this.topLabel = this.makeLabel('连接中…', 24, new Color(60, 60, 60, 255));
-        this.topLabel.node.setPosition(0, 560, 0);
+        // 顶部信息栏
+        const top = this.makeLabelNode('连接中…', 16, new Color(50, 50, 50, 255));
+        top.setPosition(0, 320, 0);
+        this.node.addChild(top);
+        this.topLabel = top.getComponent(Label)!;
 
-        this.toastLabel = this.makeLabel('', 26, new Color(180, 60, 20, 255));
-        this.toastLabel.node.setPosition(0, 470, 0);
+        // Toast（事件提示，叠在信息栏下方）
+        const toast = this.makeLabelNode('', 16, new Color(200, 80, 20, 255));
+        toast.setPosition(0, 290, 0);
+        this.node.addChild(toast);
+        this.toastLabel = toast.getComponent(Label)!;
 
+        // 中部当前墩
         this.trickNode = new Node('trick');
         this.trickNode.layer = 1 << 25;
+        this.trickNode.setPosition(0, 80, 0);
         this.node.addChild(this.trickNode);
 
+        // 下部操作按钮
         this.btnNode = new Node('buttons');
         this.btnNode.layer = 1 << 25;
-        this.btnNode.setPosition(0, -350, 0);
+        this.btnNode.setPosition(0, -170, 0);
         this.node.addChild(this.btnNode);
 
+        // 底部手牌
         this.handNode = new Node('hand');
         this.handNode.layer = 1 << 25;
-        this.handNode.setPosition(0, -540, 0);
+        this.handNode.setPosition(0, -290, 0);
         this.node.addChild(this.handNode);
     }
 
-    private makeLabel(text: string, size: number, color: Color): Label {
+    private makeLabelNode(text: string, size: number, color: Color): Node {
         const n = new Node('label');
         n.layer = 1 << 25;
+        const ut = n.addComponent(UITransform);
+        ut.setContentSize(1280, size + 8);
         const l = n.addComponent(Label);
         l.string = text;
         l.fontSize = size;
         l.lineHeight = size + 4;
         l.color = color;
-        this.node.addChild(n);
-        return l;
+        l.horizontalAlign = Label.HorizontalAlign.CENTER;
+        return n;
     }
 
     private makeButton(text: string, x: number, cb: () => void): Node {
         const n = new Node(`btn_${text}`);
         n.layer = 1 << 25;
         const ut = n.addComponent(UITransform);
-        ut.setContentSize(140, 64);
-        // 先 Graphics（底色）后 Label（文字），同节点按添加顺序渲染
+        ut.setContentSize(120, 44);
+        // 先 Graphics（背景），再 Label（文字）—— UI 节点 child 渲染顺序决定层级
         const g = n.addComponent(Graphics);
-        g.roundRect(-70, -32, 140, 64, 8);
+        g.roundRect(-60, -22, 120, 44, 6);
         g.fillColor = new Color(70, 110, 190, 255);
         g.fill();
         const l = n.addComponent(Label);
         l.string = text;
-        l.fontSize = 24;
-        l.lineHeight = 28;
+        l.fontSize = 16;
+        l.lineHeight = 20;
         l.color = new Color(255, 255, 255, 255);
         l.isBold = true;
         n.setPosition(x, 0, 0);
@@ -139,27 +150,34 @@ export class TableUI extends Component {
         const trump = s.trump ? `${s.trump.suit[0]}${s.trump.level}` : '未定';
         const pts = s.trickPoints ? JSON.stringify(s.trickPoints) : '';
         this.topLabel.string =
-            `第${s.gameNumber}局 ${phase} | 级${s.level} 主${trump} | 庄${s.banker ?? '-'} 轮${s.turn ?? '-'}\n` +
-            `捡分 ${pts}  ${this.net?.online ? '' : '⚠ 离线'}`;
+            `第${s.gameNumber}局 ${phase} | 级${s.level} 主${trump} | 庄${s.banker ?? '-'} 轮${s.turn ?? '-'}  捡分${pts}` +
+            `${this.net?.online ? '' : '  ⚠ 离线'}`;
     }
 
     private renderTrick(): void {
         this.trickNode.removeAllChildren();
         const s = this.snap;
         if (!s) return;
+
         // 四家座位铭牌 + 余牌数
         if (s.hands) {
             for (const seat of Object.keys(s.hands) as SeatName[]) {
-                const l = this.makeSeatLabel(`${seat}(${s.hands[seat]})`, seat);
+                const l = this.makeSeatLabel(`${seat}(${s.hands[seat]})`, seat, false);
                 this.trickNode.addChild(l);
             }
         }
+
         // 当前墩出牌
-        const plays = s.trick?.plays?.length
-            ? s.trick.plays
-            : (s.trick ? [{ seat: s.trick.leader, cards: s.trick.leadCards }] : []);
+        const plays: Array<{ seat: SeatName; cards: string[] }> = [];
+        if (s.trick?.plays && s.trick.plays.length > 0) {
+            for (const p of s.trick.plays) {
+                plays.push({ seat: p.seat as SeatName, cards: p.cards });
+            }
+        } else if (s.trick?.leader && s.trick.leadCards) {
+            plays.push({ seat: s.trick.leader as SeatName, cards: s.trick.leadCards });
+        }
         for (const p of plays) {
-            const l = this.makeSeatLabel(p.cards.map(c => cardFace(c).text).join(' '), p.seat as SeatName, true);
+            const l = this.makeSeatLabel(p.cards.map(c => cardFace(c).text).join(' '), p.seat, true);
             this.trickNode.addChild(l);
         }
     }
@@ -167,13 +185,18 @@ export class TableUI extends Component {
     private makeSeatLabel(text: string, seat: SeatName, isPlay = false): Node {
         const n = new Node(`seat_${seat}`);
         n.layer = 1 << 25;
+        const ut = n.addComponent(UITransform);
+        ut.setContentSize(200, isPlay ? 36 : 26);
         const l = n.addComponent(Label);
         l.string = text;
-        l.fontSize = isPlay ? 24 : 20;
-        l.lineHeight = isPlay ? 28 : 24;
-        l.color = isPlay ? new Color(30, 30, 30, 255) : new Color(120, 120, 120, 255);
+        l.fontSize = isPlay ? 18 : 14;
+        l.lineHeight = isPlay ? 26 : 20;
+        l.color = isPlay ? new Color(20, 20, 20, 255) : new Color(120, 120, 120, 255);
+        l.horizontalAlign = Label.HorizontalAlign.CENTER;
+        l.verticalAlign = Label.VerticalAlign.CENTER;
         const pos = TableUI.SEAT_POS[seat];
-        n.setPosition(pos.x, pos.y + (isPlay ? 40 : 0), 0);
+        // 出牌显示在铭牌上方
+        n.setPosition(pos.x, pos.y + (isPlay ? 26 : 0), 0);
         return n;
     }
 
@@ -181,12 +204,16 @@ export class TableUI extends Component {
         this.handNode.removeAllChildren();
         const hand = this.snap?.yourHand ?? [];
         const n = hand.length;
-        const spacing = Math.min(26, n > 1 ? 680 / (n - 1) : 26);
-        const total = n > 0 ? spacing * (n - 1) + 56 : 0;
+        if (n === 0) return;
+        // 39 张牌在 1280 宽度内排开（牌宽 56），spacing 按可用宽度计算
+        const cardW = 56;
+        const maxSpread = 1100;
+        const spacing = n > 1 ? Math.min(cardW - 12, (maxSpread - cardW) / (n - 1)) : cardW;
+        const total = spacing * (n - 1);
         for (let i = 0; i < n; i++) {
             const card = createCardNode(hand[i]);
             const selected = this.selected.has(i);
-            card.setPosition(-total / 2 + 28 + i * spacing, selected ? 30 : 0, 0);
+            card.setPosition(-total / 2 + i * spacing, selected ? 18 : 0, 0);
             if (selected) drawCardBg(card, true);
             card.on(Node.EventType.TOUCH_END, () => {
                 if (this.selected.has(i)) this.selected.delete(i);
@@ -202,7 +229,7 @@ export class TableUI extends Component {
         return [...this.selected].sort((a, b) => a - b).map(i => hand[i]);
     }
 
-    // ==================== 阶段操作按钮（T-604） ====================
+    // ==================== 阶段操作按钮 ====================
 
     private renderButtons(): void {
         this.btnNode.removeAllChildren();
@@ -212,35 +239,38 @@ export class TableUI extends Component {
         switch (s.phase) {
             case 'BIDDING': {
                 if (this.selected.size > 0) {
-                    // 亮主需声明花色：四个花色按钮（选中手牌为亮出的牌）
                     SUIT_OPTIONS.forEach((o, i) => {
-                        const b = this.makeButton(`亮${o.label}`, -240 + i * 160,
-                            () => this.net?.sendCmd('REVEAL', { cards: this.selectedCodes(), suit: o.suit }));
+                        const x = -240 + i * 160;
+                        this.makeButton(`亮${o.label}`, x, () => {
+                            this.net?.sendCmd('REVEAL', { cards: this.selectedCodes(), suit: o.suit });
+                        });
                     });
                 }
                 if (s.reveal) {
-                    this.makeButton('确认定主', 240, () => this.net?.sendCmd('CONFIRM'));
+                    this.makeButton('确认定主', -240, () => this.net?.sendCmd('CONFIRM'));
                 }
                 break;
             }
             case 'BURYING': {
                 if (s.banker === this.mySeat) {
                     const need = 6 - this.selected.size;
-                    this.makeButton(this.selected.size > 0 ? `扣底(还差${need}张)` : '扣底：选6张', 0,
-                        () => {
-                            if (this.selected.size !== 6) { this.showToast('扣底需恰好 6 张', true); return; }
-                            this.net?.sendCmd('BURY', { cards: this.selectedCodes() });
-                        });
+                    const txt = this.selected.size > 0
+                        ? `扣底(还差${Math.max(need, 0)}张)`
+                        : '扣底：选6张';
+                    this.makeButton(txt, 0, () => {
+                        if (this.selected.size !== 6) { this.showToast('扣底需恰好 6 张', true); return; }
+                        this.net?.sendCmd('BURY', { cards: this.selectedCodes() });
+                    });
                 }
                 break;
             }
             case 'PLAYING': {
                 if (myTurn) {
-                    this.makeButton(this.selected.size > 0 ? '出牌' : '出牌：先选牌', 0,
-                        () => {
-                            if (this.selected.size === 0) { this.showToast('先点选要出的牌', true); return; }
-                            this.net?.sendCmd('PLAY', { cards: this.selectedCodes() });
-                        });
+                    this.makeButton(this.selected.size > 0 ? '出牌' : '出牌：先选牌', 0, () => {
+                        if (this.selected.size === 0) { this.showToast('先点选要出的牌', true); return; }
+                        this.net?.sendCmd('PLAY', { cards: this.selectedCodes() });
+                        this.selected.clear();
+                    });
                 }
                 break;
             }
@@ -250,18 +280,19 @@ export class TableUI extends Component {
                     this.makeButton('进贡', 0, () => {
                         if (this.selected.size === 0) { this.showToast('先选要贡的牌', true); return; }
                         this.net?.sendCmd('TRIBUTE', { cards: this.selectedCodes(), payee: mine.receiver });
+                        this.selected.clear();
                     });
                 }
                 break;
             }
             case 'RETURN_TRIBUTE': {
-                // 找到贡给我的那位（pendingTributes[x].receiver == 我）→ 还贡给他
                 const payer = Object.entries(s.pendingTributes ?? {})
                     .find(([, v]) => v.receiver === this.mySeat)?.[0];
                 if (payer) {
                     this.makeButton('还贡', 0, () => {
                         if (this.selected.size === 0) { this.showToast('先选要还的牌', true); return; }
                         this.net?.sendCmd('RETURN_TRIBUTE', { cards: this.selectedCodes(), payee: payer });
+                        this.selected.clear();
                     });
                 }
                 break;
@@ -272,15 +303,15 @@ export class TableUI extends Component {
     // ==================== 事件提示 ====================
 
     private onEventToast(e: EventMsg): void {
-        if (e.op === 'DEAL') return; // 发牌事件太吵
+        if (e.op === 'DEAL') return;
         const who = e.seat ?? '';
         const what = e.cards?.length ? ` ${e.cards.map(c => cardFace(c).text).join(' ')}` : '';
         const fail = e.success === false ? ` 失败:${String(e.reason ?? '')}` : '';
         this.showToast(`${who} ${TableUI.PHASE_TEXT[e.op] ?? e.op}${what}${fail}`, e.success === false);
     }
 
-    private showToast(text: string, _warn = false): void {
+    private showToast(text: string, warn = false): void {
         this.toastLabel.string = text;
-        this.toastLabel.color = _warn ? new Color(200, 30, 30, 255) : new Color(160, 100, 20, 255);
+        this.toastLabel.color = warn ? new Color(200, 30, 30, 255) : new Color(160, 100, 20, 255);
     }
 }
