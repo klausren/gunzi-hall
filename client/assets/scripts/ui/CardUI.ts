@@ -53,27 +53,45 @@ export function createCardNode(code: string): Node {
     const ut = node.addComponent(UITransform);
     ut.setContentSize(CARD_W, CARD_H);
 
-    // 一个节点只能挂一个 UIRenderer：Graphics 留在本节点，Label 必须拆到子节点
+    // 一个节点只能挂一个 UIRenderer：Graphics 留在本节点，Label 必须拆到子节点。
+    // 点数与花色各用一个 Label：混合串 "♠3" 在系统字下会折行/截断（只显示花色）
     drawCardBg(node, false);
 
-    const face = cardFace(code);
-    const text = new Node('face');
-    text.layer = 1 << 25;
-    const tut = text.addComponent(UITransform);
-    tut.setContentSize(CARD_W, CARD_H);
-    const label = text.addComponent(Label);
-    label.string = face.text;
-    label.fontSize = face.text.length > 2 ? 18 : 24;
-    label.lineHeight = face.text.length > 2 ? 18 : 24;
-    label.color = face.color;
+    const isJoker = code === 'BJ' || code === 'SJ';
+    if (isJoker) {
+        addFaceLabel(node, code === 'BJ' ? '大王' : '小王', 0, 0, 18,
+            new Color(code === 'BJ' ? 200 : 160, 150, 20, 255));
+    } else {
+        const suit = SUIT_CHAR[code[0]];
+        const rank = parseInt(code.slice(1), 10);
+        const rankText = RANK_TEXT[rank] ?? String(rank);
+        const color = suit?.red ? new Color(200, 30, 30, 255) : new Color(30, 30, 30, 255);
+        addFaceLabel(node, rankText, 0, 10, 26, color);      // 点数大字
+        if (suit) addFaceLabel(node, suit.ch, 0, -18, 20, color); // 花色符号
+    }
+
+    node.userData = { code };
+    return node;
+}
+
+/** 在牌节点上加一个居中文字子节点 */
+function addFaceLabel(parent: Node, text: string, x: number, y: number,
+                       fontSize: number, color: Color): void {
+    const n = new Node('face');
+    n.layer = 1 << 25;
+    const ut = n.addComponent(UITransform);
+    ut.setContentSize(CARD_W, fontSize + 6);
+    const label = n.addComponent(Label);
+    label.string = text;
+    label.fontSize = fontSize;
+    label.lineHeight = fontSize + 2;
+    label.color = color;
     label.isBold = true;
     label.useSystemFont = true;     // 大王/小王中文 + 花色符号都得走系统字
     label.horizontalAlign = Label.HorizontalAlign.CENTER;
     label.verticalAlign = Label.VerticalAlign.CENTER;
-    node.addChild(text);
-
-    node.userData = { code };
-    return node;
+    n.setPosition(x, y, 0);
+    parent.addChild(n);
 }
 
 /** 重绘牌背（选中 = 金色粗边框） */
