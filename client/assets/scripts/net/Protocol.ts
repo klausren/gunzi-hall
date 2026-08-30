@@ -70,11 +70,21 @@ export interface SnapshotMsgDown {
     roomId: number;
     phase: string;          // WAITING/DEALING/BIDDING/BURYING/PLAYING/SETTLED...
     gameNumber: number;
-    turnSeat?: SeatName | null;
-    bankerSeat?: SeatName | null;
-    yourSeat?: SeatName;
-    yourHand: string[];     // 私有手牌（仅本人可见）
-    handCounts?: Record<string, number>;
+    level: number;                          // 当前级数（3~10）
+    trump?: { level: number; suit: string }; // 定主信息
+    reveal?: { kind: string; suit: string; seat: SeatName }; // 亮王/反主状态
+    banker?: SeatName | null;               // 庄家座位
+    turn?: SeatName | null;                 // 当前轮到谁出牌/行动
+    followRule: string;                     // 跟牌规则（STRICT/ALIVE...）
+    hands: Record<string, number>;          // 各座位余牌数
+    yourHand: string[];                     // 私有手牌（仅本人可见，已按主牌排序）
+    trick?: {                               // 当前一墩
+        leader: SeatName;                   // 首出者
+        leadCards: string[];                // 首出牌
+        plays: { seat: SeatName; cards: string[] }[]; // 跟牌记录
+    };
+    trickPoints?: Record<string, number>;   // 各队已捡分
+    pendingTributes?: Record<string, { blood: number; receiver: string }>; // 待进贡
     [k: string]: unknown;
 }
 

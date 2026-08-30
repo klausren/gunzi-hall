@@ -40,7 +40,9 @@ export class NetTest extends Component {
         });
         this.net.onSnapshot(s => this.dumpSnapshot(s));
         this.net.onEvent(e => {
-            console.log(`[NetTest] event: type=${e.evt}${e.cards?.length ? ` cards=${e.cards.join(',')}` : ''}`);
+            const who = e.seat ? `${e.seat}#${e.playerId}` : `${e.playerId}`;
+            const fail = e.success === false ? ' ❌失败' : '';
+            console.log(`[NetTest] event: ${e.op} by ${who}${fail}${e.cards?.length ? ` cards=${e.cards.join(',')}` : ''}`);
         });
         this.net.onError(reason => console.warn(`[NetTest] 服务器错误: ${reason}`));
 
@@ -51,11 +53,22 @@ export class NetTest extends Component {
     private dumpSnapshot(s: SnapshotMsgDown): void {
         const hand = s.yourHand ?? [];
         console.log('[NetTest] ====== 快照 ======');
-        console.log(`  roomId=${s.roomId} 第${s.gameNumber}局 阶段=${s.phase}`);
-        console.log(`  庄家=${s.bankerSeat ?? '未定'}  当前轮到=${s.turnSeat ?? '-'}  我的座位=${s.yourSeat ?? '-'}`);
+        console.log(`  roomId=${s.roomId} 第${s.gameNumber}局 阶段=${s.phase} 级数=${s.level}`);
+        const trump = s.trump ? `主牌=${s.trump.suit}` : '主牌=未定';
+        console.log(`  ${trump}  庄家=${s.banker ?? '未定'}  轮到=${s.turn ?? '-'}`);
+        if (s.reveal) {
+            console.log(`  亮牌: ${s.reveal.kind} ${s.reveal.suit} by ${s.reveal.seat}`);
+        }
         console.log(`  我的手牌（${hand.length} 张）: ${hand.join(' ')}`);
-        if (s.handCounts) {
-            console.log(`  各家余牌: ${JSON.stringify(s.handCounts)}`);
+        if (s.hands) {
+            console.log(`  各家余牌: ${JSON.stringify(s.hands)}`);
+        }
+        if (s.trick) {
+            const plays = s.trick.plays.map(p => `${p.seat}:${p.cards.join(',')}`).join(' | ');
+            console.log(`  当前墩: 首出 ${s.trick.leader}:${s.trick.leadCards.join(',')} ${plays ? '| 跟出 ' + plays : ''}`);
+        }
+        if (s.trickPoints && Object.keys(s.trickPoints).length) {
+            console.log(`  已捡分: ${JSON.stringify(s.trickPoints)}`);
         }
     }
 
