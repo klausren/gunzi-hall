@@ -7,18 +7,21 @@
 
 ```
 client/
+  package.json          Creator 3.8.8 工程描述（type: 2d）
   assets/
     scripts/
+      NetTest.ts        联调测试组件（挂 Canvas，连本地服打印链路日志）
       net/
         Protocol.ts    协议与类型定义（上行/下行消息、牌编码）
         NetClient.ts   WebSocket 封装：心跳 / 指数退避重连 / token 自动管理
 ```
 
-## 接入 Cocos 工程
+## 接入 Cocos 工程（已建好，直接用）
 
-1. 安装 Cocos Dashboard + Creator 3.8.x，新建空项目（或直接用本项目后续工程）
-2. 把 `assets/scripts/net/` 拷贝（或软链）到工程 `assets/scripts/net/`
-3. 场景组件中使用：
+1. 打开 Cocos Dashboard → 项目 → **打开其他项目** → 选择本 `client/` 目录（工程描述 package.json 已就位，Creator 3.8.8 首次打开会自动导入资产）
+2. 首次打开后：菜单 文件 → 新建场景 → 保存到 `assets/scenes/main`
+3. 场景层级里选中 **Canvas** 节点 → 属性检查器 **添加组件 → 自定义脚本 → NetTest**（联调测试组件，连本地战斗服打印快照/事件）
+4. 点编辑器顶部 ▶ 预览，浏览器控制台应看到 `joined → snapshot`，bot 出牌事件持续刷出
 
 ```typescript
 import { _decorator, Component } from 'cc';
