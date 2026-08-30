@@ -59,8 +59,8 @@ public final class PlayCardsCommand extends AbstractGameCommand {
             return CommandResult.fail("还没轮到该玩家出牌，当前轮到: "
                     + room.turnSeat().map(Object::toString).orElse("未定"));
         }
-        if (!player.hand().containsAll(cards)) {
-            return CommandResult.fail("所出之牌不在手牌中");
+        if (!com.gunzihall.domain.card.Cards.containsCopies(player.hand(), cards)) {
+            return CommandResult.fail("所出之牌不在手牌中（或副本数不足）");
         }
         TrumpContext trump = room.trump().orElse(null);
         if (trump == null) {
@@ -88,7 +88,7 @@ public final class PlayCardsCommand extends AbstractGameCommand {
         }
 
         playedLog.addAll(cards);
-        player.hand().removeAll(cards);
+        com.gunzihall.domain.card.Cards.removeCopies(player.hand(), cards);
 
         if (trick.isComplete()) {
             var winner = trick.winnerSeat();

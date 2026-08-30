@@ -66,8 +66,8 @@ public final class BuryBottomCommand extends AbstractGameCommand {
         if (cards.size() != originalBottom.size()) {
             return CommandResult.fail("扣底张数必须等于底牌张数 " + originalBottom.size());
         }
-        if (!banker.hand().containsAll(cards)) {
-            return CommandResult.fail("所扣之牌不在庄家手牌中");
+        if (!com.gunzihall.domain.card.Cards.containsCopies(banker.hand(), cards)) {
+            return CommandResult.fail("所扣之牌不在庄家手牌中（或副本数不足）");
         }
 
         // ---- 干锅判定（用原底牌；级牌/2/王不算主花色普通牌） ----
@@ -86,19 +86,23 @@ public final class BuryBottomCommand extends AbstractGameCommand {
         }
 
         // ---- Q5：扣王必须先扣完所有大王，才能扣小王 ----
-        long handBigJokers = banker.hand().stream()
-                .filter(c -> c.isJoker() && c.joker() == Joker.BIG).count();
-        long buriedBigJokers = cards.stream()
-                .filter(c -> c.isJoker() && c.joker() == Joker.BIG).count();
-        boolean buriedSmallJoker = cards.stream()
-                .anyMatch(c -> c.isJoker() && c.joker() == Joker.SMALL);
-        if (buriedSmallJoker && handBigJokers > 0 && buriedBigJokers != handBigJokers) {
-            return CommandResult.fail("扣王必须先扣完所有大王才能扣小王（Q5 系统强制约束）：手牌有 "
-                    + handBigJokers + " 张大王，扣牌中只有 " + buriedBigJokers + " 张");
+        // 干锅局强制原样扣回时跳过：系统强制行为无选择余地（底牌含小王而庄家手里
+        // 有大王时，Q5 与干锅约束会互相矛盾，以干锅"不能替换"为准）。
+        if (!dryPot) {
+            long handBigJokers = banker.hand().stream()
+                    .filter(c -> c.isJoker() && c.joker() == Joker.BIG).count();
+            long buriedBigJokers = cards.stream()
+                    .filter(c -> c.isJoker() && c.joker() == Joker.BIG).count();
+            boolean buriedSmallJoker = cards.stream()
+                    .anyMatch(c -> c.isJoker() && c.joker() == Joker.SMALL);
+            if (buriedSmallJoker && handBigJokers > 0 && buriedBigJokers != handBigJokers) {
+                return CommandResult.fail("扣王必须先扣完所有大王才能扣小王（Q5 系统强制约束）：手牌有 "
+                        + handBigJokers + " 张大王，扣牌中只有 " + buriedBigJokers + " 张");
+            }
         }
 
         // ---- 执行 ----
-        banker.hand().removeAll(cards);
+        com.gunzihall.domain.card.Cards.removeCopies(banker.hand(), cards);
         room.setBottomCards(cards);
         room.setTurnSeat(bankerSeat); // 庄家领出第一手
         room.transitionTo(GamePhase.PLAYING);

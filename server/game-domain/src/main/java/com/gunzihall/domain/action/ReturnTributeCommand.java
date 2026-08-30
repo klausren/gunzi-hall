@@ -46,11 +46,11 @@ public final class ReturnTributeCommand extends AbstractGameCommand {
         if (cards.size() != received.size()) {
             return CommandResult.fail("还贡张数必须等于进贡张数 " + received.size());
         }
-        if (!receiver.hand().containsAll(cards)) {
-            return CommandResult.fail("所还之牌不在收贡人手牌中");
+        if (!com.gunzihall.domain.card.Cards.containsCopies(receiver.hand(), cards)) {
+            return CommandResult.fail("所还之牌不在收贡人手牌中（或副本数不足）");
         }
 
-        receiver.hand().removeAll(cards);
+        com.gunzihall.domain.card.Cards.removeCopies(receiver.hand(), cards);
         room.playerAt(payeeSeat).hand().addAll(cards);
         room.markTributeReturned(payeeSeat);
 

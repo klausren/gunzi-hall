@@ -75,7 +75,7 @@ public final class TributeCommand extends AbstractGameCommand {
         }
 
         // ---- 执行：贡牌离手，交到收贡人手中 ----
-        player.hand().removeAll(cards);
+        com.gunzihall.domain.card.Cards.removeCopies(player.hand(), cards);
         Player receiver = room.playerAt(obligation.receiver());
         receiver.hand().addAll(cards);
         room.recordTribute(player.seat(), cards);

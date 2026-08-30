@@ -14,6 +14,7 @@
 
     <modules>
         <module>game-domain</module>
+        <module>game-room</module>
     </modules>
 
     <properties>
