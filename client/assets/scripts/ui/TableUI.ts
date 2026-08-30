@@ -65,7 +65,7 @@ export class TableUI extends Component {
 
     private buildLayout(): void {
         // 顶部信息栏
-        const top = this.makeLabelNode('连接中…', 16, new Color(50, 50, 50, 255));
+        const top = this.makeLabelNode('连接中…', 18, new Color(50, 50, 50, 255));
         top.setPosition(0, 320, 0);
         this.node.addChild(top);
         this.topLabel = top.getComponent(Label)!;
@@ -82,16 +82,16 @@ export class TableUI extends Component {
         this.trickNode.setPosition(0, 80, 0);
         this.node.addChild(this.trickNode);
 
-        // 下部操作按钮
+        // 下部操作按钮（提到 y=-130，躲开发调试面板大约 y∈[-100,-200] 区域）
         this.btnNode = new Node('buttons');
         this.btnNode.layer = 1 << 25;
-        this.btnNode.setPosition(0, -170, 0);
+        this.btnNode.setPosition(0, -30, 0);
         this.node.addChild(this.btnNode);
 
-        // 底部手牌
+        // 底部手牌（y=-220，调试面板关闭时牌底 y=-260<屏底-360）
         this.handNode = new Node('hand');
         this.handNode.layer = 1 << 25;
-        this.handNode.setPosition(0, -290, 0);
+        this.handNode.setPosition(0, -240, 0);
         this.node.addChild(this.handNode);
     }
 
@@ -105,7 +105,10 @@ export class TableUI extends Component {
         l.fontSize = size;
         l.lineHeight = size + 4;
         l.color = color;
+        // 系统字体：Bitmap font 可能缺字（如“庄”），“”等中文不可靠
+        l.useSystemFont = true;
         l.horizontalAlign = Label.HorizontalAlign.CENTER;
+        l.verticalAlign = Label.VerticalAlign.CENTER;
         return n;
     }
 
@@ -113,18 +116,26 @@ export class TableUI extends Component {
         const n = new Node(`btn_${text}`);
         n.layer = 1 << 25;
         const ut = n.addComponent(UITransform);
-        ut.setContentSize(120, 44);
-        // 先 Graphics（背景），再 Label（文字）—— UI 节点 child 渲染顺序决定层级
+        ut.setContentSize(140, 48);
         const g = n.addComponent(Graphics);
-        g.roundRect(-60, -22, 120, 44, 6);
+        g.roundRect(-70, -24, 140, 48, 8);
         g.fillColor = new Color(70, 110, 190, 255);
         g.fill();
-        const l = n.addComponent(Label);
+        // Label 独立节点挂在按钮下，填满整个按钮区域
+        const txt = new Node(`txt_${text}`);
+        txt.layer = 1 << 25;
+        const txtUt = txt.addComponent(UITransform);
+        txtUt.setContentSize(140, 48);
+        const l = txt.addComponent(Label);
         l.string = text;
-        l.fontSize = 16;
-        l.lineHeight = 20;
+        l.fontSize = 18;
+        l.lineHeight = 22;
         l.color = new Color(255, 255, 255, 255);
         l.isBold = true;
+        l.useSystemFont = true;            // 避免按钮文字缺字
+        l.horizontalAlign = Label.HorizontalAlign.CENTER;
+        l.verticalAlign = Label.VerticalAlign.CENTER;
+        n.addChild(txt);
         n.setPosition(x, 0, 0);
         n.on(Node.EventType.TOUCH_END, cb);
         this.btnNode.addChild(n);
@@ -192,6 +203,7 @@ export class TableUI extends Component {
         l.fontSize = isPlay ? 18 : 14;
         l.lineHeight = isPlay ? 26 : 20;
         l.color = isPlay ? new Color(20, 20, 20, 255) : new Color(120, 120, 120, 255);
+        l.useSystemFont = true;
         l.horizontalAlign = Label.HorizontalAlign.CENTER;
         l.verticalAlign = Label.VerticalAlign.CENTER;
         const pos = TableUI.SEAT_POS[seat];

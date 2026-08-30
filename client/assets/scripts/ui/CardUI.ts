@@ -63,6 +63,7 @@ export function createCardNode(code: string): Node {
     label.lineHeight = face.text.length > 2 ? 18 : 22;
     label.color = face.color;
     label.isBold = true;
+    label.useSystemFont = true;     // 大王/小王中文 + 花色符号都得走系统字
 
     node.userData = { code };
     return node;
