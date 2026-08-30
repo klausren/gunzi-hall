@@ -74,6 +74,59 @@ export function createCardNode(code: string): Node {
     return node;
 }
 
+/**
+ * 迷你牌（桌面出牌区用）：32×46，数字 16px、花色 12px。
+ * 同一节点只挂 Graphics 画背，文字拆到子节点——复用主牌同样的单 UIRenderer 规则。
+ */
+export function createMiniCardNode(code: string): Node {
+    const W = 32, H = 46;
+    const node = new Node(`mini_${code}`);
+    node.layer = 1 << 25;
+    const ut = node.addComponent(UITransform);
+    ut.setContentSize(W, H);
+
+    const g = node.addComponent(Graphics);
+    g.clear();
+    g.roundRect(-W / 2, -H / 2, W, H, 4);
+    g.fillColor = new Color(250, 250, 245, 255);
+    g.fill();
+    g.lineWidth = 1;
+    g.strokeColor = new Color(160, 160, 155, 255);
+    g.stroke();
+
+    const isJoker = code === 'BJ' || code === 'SJ';
+    if (isJoker) {
+        addMiniText(node, code === 'BJ' ? '大' : '小', 0, 0, 16,
+            new Color(code === 'BJ' ? 200 : 160, 150, 20, 255));
+    } else {
+        const suit = SUIT_CHAR[code[0]];
+        const rank = parseInt(code.slice(1), 10);
+        const rankText = RANK_TEXT[rank] ?? String(rank);
+        const color = suit?.red ? new Color(200, 30, 30, 255) : new Color(30, 30, 30, 255);
+        addMiniText(node, rankText, 0, 6, 18, color);
+        if (suit) addMiniText(node, suit.ch, 0, -10, 13, color);
+    }
+    return node;
+}
+
+function addMiniText(parent: Node, text: string, x: number, y: number,
+                     fontSize: number, color: Color): void {
+    const n = new Node('t');
+    n.layer = 1 << 25;
+    n.addComponent(UITransform).setContentSize(32, fontSize + 4);
+    const label = n.addComponent(Label);
+    label.string = text;
+    label.fontSize = fontSize;
+    label.lineHeight = fontSize + 2;
+    label.color = color;
+    label.isBold = true;
+    label.useSystemFont = true;
+    label.horizontalAlign = Label.HorizontalAlign.CENTER;
+    label.verticalAlign = Label.VerticalAlign.CENTER;
+    n.setPosition(x, y, 0);
+    parent.addChild(n);
+}
+
 /** 在牌节点上加一个居中文字子节点 */
 function addFaceLabel(parent: Node, text: string, x: number, y: number,
                        fontSize: number, color: Color): void {

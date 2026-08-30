@@ -1,7 +1,7 @@
 import { _decorator, Color, Component, Graphics, Label, Node, UITransform, Vec3 } from 'cc';
 import { NetClient } from '../net/NetClient';
 import type { EventMsg, SeatName, SnapshotMsgDown } from '../net/Protocol';
-import { cardFace, createCardNode, drawCardBg, SUIT_OPTIONS } from './CardUI';
+import { createCardNode, createMiniCardNode, drawCardBg, SUIT_OPTIONS } from './CardUI';
 
 const { ccclass, property } = _decorator;
 
@@ -28,6 +28,7 @@ export class TableUI extends Component {
     private selected = new Set<number>();   // 手牌下标
 
     private topLabel!: Label;
+    private scoreLabel!: Label;
     private toastLabel!: Label;
     private trickNode!: Node;
     private handNode!: Node;
@@ -64,15 +65,21 @@ export class TableUI extends Component {
     // ==================== 布局骨架 ====================
 
     private buildLayout(): void {
-        // 顶部信息栏
+        // 顶部信息栏（行 1：局/阶段/级数/主牌/庄/轮）
         const top = this.makeLabelNode('连接中…', 18, new Color(50, 50, 50, 255));
         top.setPosition(0, 320, 0);
         this.node.addChild(top);
         this.topLabel = top.getComponent(Label)!;
 
+        // 顶部信息栏（行 2：本墩捡分 + 各家分，醒目色）
+        const score = this.makeLabelNode('', 20, new Color(220, 80, 30, 255));
+        score.setPosition(0, 288, 0);
+        this.node.addChild(score);
+        this.scoreLabel = score.getComponent(Label)!;
+
         // Toast（事件提示，叠在信息栏下方）
         const toast = this.makeLabelNode('', 16, new Color(200, 80, 20, 255));
-        toast.setPosition(0, 290, 0);
+        toast.setPosition(0, 258, 0);
         this.node.addChild(toast);
         this.toastLabel = toast.getComponent(Label)!;
 
@@ -155,14 +162,23 @@ export class TableUI extends Component {
         const s = this.snap;
         if (!s) {
             this.topLabel.string = this.net?.online ? '已连接，等待快照…' : '连接中…';
+            this.scoreLabel.string = '';
             return;
         }
         const phase = TableUI.PHASE_TEXT[s.phase] ?? s.phase;
         const trump = s.trump ? `${s.trump.suit[0]}${s.trump.level}` : '未定';
-        const pts = s.trickPoints ? JSON.stringify(s.trickPoints) : '';
         this.topLabel.string =
-            `第${s.gameNumber}局 ${phase} | 级${s.level} 主${trump} | 庄${s.banker ?? '-'} 轮${s.turn ?? '-'}  捡分${pts}` +
-            `${this.net?.online ? '' : '  ⚠ 离线'}`;
+            `第${s.gameNumber}局 ${phase} | 级${s.level} 主${trump} | 庄${s.banker ?? '-'} 轮${s.turn ?? '-'}`
+            + `${this.net?.online ? '' : '  ⚠ 离线'}`;
+
+        // 本墩分 + 各家分（醒目色）
+        const trickPts = s.trickPoints ?? {};
+        const totalPts = Object.values(trickPts).reduce((a, b) => a + (b as number), 0);
+        const breakdown = Object.entries(trickPts)
+            .map(([team, v]) => `${team} ${v}`).join('  ');
+        this.scoreLabel.string = totalPts > 0
+            ? `本墩捡分 ${totalPts}（${breakdown}）`
+            : '本墩暂未捡分';
     }
 
     private renderTrick(): void {
@@ -178,7 +194,7 @@ export class TableUI extends Component {
             }
         }
 
-        // 当前墩出牌
+        // 当前墩出牌：用迷你牌（真实牌面 + 花色）显示在每家铭牌上方
         const plays: Array<{ seat: SeatName; cards: string[] }> = [];
         if (s.trick?.plays && s.trick.plays.length > 0) {
             for (const p of s.trick.plays) {
@@ -188,8 +204,20 @@ export class TableUI extends Component {
             plays.push({ seat: s.trick.leader as SeatName, cards: s.trick.leadCards });
         }
         for (const p of plays) {
-            const l = this.makeSeatLabel(p.cards.map(c => cardFace(c).text).join(' '), p.seat, true);
-            this.trickNode.addChild(l);
+            this.renderPlacedCards(p.seat, p.cards);
+        }
+    }
+
+    /** 在指定座位铭牌上方横排渲染一组牌（多张时摊开） */
+    private renderPlacedCards(seat: SeatName, cards: string[]): void {
+        const pos = TableUI.SEAT_POS[seat];
+        const spacing = 22;   // 迷你牌 32 宽 + 间隔
+        const totalW = (cards.length - 1) * spacing;
+        for (let i = 0; i < cards.length; i++) {
+            const c = createMiniCardNode(cards[i]);
+            // 位于铭牌上方 32px（让出 26px 铭牌 + 6px 间隙）；多张牌居中横排
+            c.setPosition(pos.x - totalW / 2 + i * spacing, pos.y + 32, 0);
+            this.trickNode.addChild(c);
         }
     }
 
