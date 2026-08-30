@@ -1,4 +1,4 @@
-import { _decorator, Color, Component, Graphics, Label, Node, UITransform, Vec3 } from 'cc';
+import { _decorator, Color, Component, Graphics, Label, Node, UITransform, Vec3, view } from 'cc';
 import { NetClient } from '../net/NetClient';
 import type { EventMsg, SeatName, SnapshotMsgDown } from '../net/Protocol';
 import { cardFace, createCardNode, createMiniCardNode, drawCardBg, SUIT_OPTIONS } from './CardUI';
@@ -245,9 +245,10 @@ export class TableUI extends Component {
         const hand = this.snap?.yourHand ?? [];
         const n = hand.length;
         if (n === 0) return;
-        // 39 张牌在 1280 宽度内排开（牌宽 56），spacing 按可用宽度计算
+        // 39 张牌排开（牌宽 56）：横屏按 1100 上限，窄窗口/竖屏按可见宽度收缩，避免手牌被裁
         const cardW = 56;
-        const maxSpread = 1100;
+        const vw = view.getVisibleSize().width;
+        const maxSpread = Math.min(1100, vw - 60);
         const gap = 16;   // 组间额外间隙（副牌按花色分堆 + 主牌一堆）
         const groups = this.groupCount(hand);
         const gapTotal = Math.max(groups - 1, 0) * gap;
@@ -310,15 +311,15 @@ export class TableUI extends Component {
     }
 
     /**
-     * 分组号：0..3 = 副牌四堆（按 SIDE_ORDER），4 = 主牌堆（最右）。
-     * 定主前无主牌堆，全部按花色分堆。
+     * 分组号：0 = 主牌堆（最左），1..4 = 副牌四堆（按 SIDE_ORDER）。
+     * 定主前无主牌堆：王单独一堆靠左，其余按花色分堆。
      */
     private groupOf(code: string): number {
         const { suit, joker } = this.parseCode(code);
-        if (joker > 0) return 4;   // 王恒在最右堆：无主时单独一堆，定主后并入主牌堆
-        if (this.isTrumpCard(code)) return 4;
+        if (joker > 0) return 0;   // 王恒在最左堆：无主时单独一堆，定主后并入主牌堆
+        if (this.isTrumpCard(code)) return 0;
         const g = TableUI.SIDE_ORDER.indexOf(suit);
-        return g >= 0 ? g : 3;
+        return g >= 0 ? g + 1 : 4;
     }
 
     private groupCount(hand: string[]): number {
@@ -329,7 +330,7 @@ export class TableUI extends Component {
 
     /**
      * 返回排序后的原始下标数组（显示从左到右）。
-     * 副牌堆内从大到小（A 在左）；主牌堆按手册 2.1 牌力从小到大（大王最右）。
+     * 主牌堆最左、按牌力从大到小（大王最左）；副牌四堆在其后，堆内同样从大到小（A 在左）。
      */
     private sortHand(hand: string[]): number[] {
         const t = this.snap?.trump;
@@ -349,10 +350,10 @@ export class TableUI extends Component {
         idx.sort((a, b) => {
             const ga = this.groupOf(hand[a]);
             const gb = this.groupOf(hand[b]);
-            if (ga !== gb) return ga - gb;                      // 先按堆（主牌最右）
+            if (ga !== gb) return ga - gb;                      // 先按堆（主牌最左）
             const ta = tierOf(hand[a]);
             const tb = tierOf(hand[b]);
-            if (ta !== tb) return ga === 4 ? ta - tb : tb - ta; // 副牌大到小 / 主牌小到大
+            return tb - ta;                                     // 堆内统一从大到小（副牌 A 在左 / 主牌大王在左）
             return hand[a].localeCompare(hand[b]);              // 同牌力多副本兜底，保证稳定
         });
         return idx;
