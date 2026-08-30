@@ -1,0 +1,10 @@
+# Cocos Creator 生成目录（勿提交）
+library/
+temp/
+local/
+native/
+build/
+profiles/
+
+# 系统文件
+.DS_Store
