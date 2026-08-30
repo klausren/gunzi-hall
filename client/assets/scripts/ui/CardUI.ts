@@ -53,17 +53,24 @@ export function createCardNode(code: string): Node {
     const ut = node.addComponent(UITransform);
     ut.setContentSize(CARD_W, CARD_H);
 
-    // 先加 Graphics（牌背），后加 Label（牌面文字）——同节点按组件添加顺序渲染
+    // 一个节点只能挂一个 UIRenderer：Graphics 留在本节点，Label 必须拆到子节点
     drawCardBg(node, false);
 
     const face = cardFace(code);
-    const label = node.addComponent(Label);
+    const text = new Node('face');
+    text.layer = 1 << 25;
+    const tut = text.addComponent(UITransform);
+    tut.setContentSize(CARD_W, CARD_H);
+    const label = text.addComponent(Label);
     label.string = face.text;
-    label.fontSize = face.text.length > 2 ? 18 : 22;
-    label.lineHeight = face.text.length > 2 ? 18 : 22;
+    label.fontSize = face.text.length > 2 ? 18 : 24;
+    label.lineHeight = face.text.length > 2 ? 18 : 24;
     label.color = face.color;
     label.isBold = true;
     label.useSystemFont = true;     // 大王/小王中文 + 花色符号都得走系统字
+    label.horizontalAlign = Label.HorizontalAlign.CENTER;
+    label.verticalAlign = Label.VerticalAlign.CENTER;
+    node.addChild(text);
 
     node.userData = { code };
     return node;

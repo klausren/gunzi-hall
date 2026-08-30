@@ -227,6 +227,9 @@ export class TableUI extends Component {
             const selected = this.selected.has(i);
             card.setPosition(-total / 2 + i * spacing, selected ? 18 : 0, 0);
             if (selected) drawCardBg(card, true);
+            // 牌面 56 宽但间距 44 互相重叠：命中区缩为一张 spacing 宽，
+            // 否则点牌的右侧露出部分会命中叠在上面的右边那张（视觉错位）
+            card.getComponent(UITransform)!.setContentSize(Math.min(spacing, cardW), 80);
             card.on(Node.EventType.TOUCH_END, () => {
                 if (this.selected.has(i)) this.selected.delete(i);
                 else this.selected.add(i);
