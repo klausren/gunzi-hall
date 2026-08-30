@@ -30,9 +30,31 @@ export class TableUI extends Component {
     private topLabel!: Label;
     private scoreLabel!: Label;
     private toastLabel!: Label;
+    private timerLabel!: Label;
     private trickNode!: Node;
     private handNode!: Node;
     private btnNode!: Node;
+    private settleNode: Node | null = null;
+
+    // 出牌倒计时（仅本地提醒；服务端无超时托管，超时不出牌 bot 会一直等）
+    private timerDeadline = 0;
+    private timerKey = '';
+    private static readonly TURN_SECONDS = 30;
+
+    // 结算面板：收到 SETTLE 事件后展示 8s（服务端无 SETTLED 阶段，
+    // SettleRoundCommand 直接 SETTLING→DEALING 开新局，只能事件驱动）
+    private settleVisibleUntil = 0;
+    private settleGameNumber = 0;   // 结算命令会把 gameNumber+1，事件里的局号已是下一局
+    private preSettleBanker: SeatName | null = null; // 本局庄家（SETTLE 后快照的 banker 已是新庄，不能用）
+    private static readonly SETTLE_SHOW_MS = 8000;
+
+    /** 只有这些阶段的 banker 才是"本局"庄家（结算切庄后 DEALING/BIDDING 里已是下一局的） */
+    private static readonly IN_GAME_PHASES = new Set(['BURYING', 'TRIBUTE', 'RETURN_TRIBUTE', 'PLAYING', 'SETTLING']);
+
+    /** 对家（搭档）座位 */
+    private static readonly PARTNER: Record<SeatName, SeatName> = {
+        NORTH: 'SOUTH', SOUTH: 'NORTH', EAST: 'WEST', WEST: 'EAST',
+    };
 
     // 设计分辨率 1280×720 内的布局常量
     private static readonly SEAT_POS: Record<SeatName, Vec3> = {
@@ -44,7 +66,8 @@ export class TableUI extends Component {
 
     private static readonly PHASE_TEXT: Record<string, string> = {
         WAITING: '等待中', DEALING: '发牌中', BIDDING: '亮主', BURYING: '扣底',
-        PLAYING: '出牌', TRIBUTE: '进贡', RETURN_TRIBUTE: '还贡', SETTLED: '结算',
+        PLAYING: '出牌', TRIBUTE: '进贡', RETURN_TRIBUTE: '还贡',
+        SETTLING: '结算中', SETTLE: '结算', ROUND_OVER: '整轮结束',
     };
 
     start(): void {
@@ -82,6 +105,12 @@ export class TableUI extends Component {
         toast.setPosition(0, 258, 0);
         this.node.addChild(toast);
         this.toastLabel = toast.getComponent(Label)!;
+
+        // 出牌倒计时（轮到我时显示在按钮区右侧）
+        const timer = this.makeLabelNode('', 32, new Color(235, 145, 25, 255));
+        timer.setPosition(240, -30, 0);
+        this.node.addChild(timer);
+        this.timerLabel = timer.getComponent(Label)!;
 
         // 中部当前墩
         this.trickNode = new Node('trick');
@@ -152,10 +181,142 @@ export class TableUI extends Component {
     // ==================== 渲染 ====================
 
     private renderAll(): void {
+        // 持续记录本局庄家：结算面板要在切庄后仍按"本局"的庄/抓分队贴标签
+        const cur = this.snap;
+        if (cur?.banker && TableUI.IN_GAME_PHASES.has(cur.phase)) {
+            this.preSettleBanker = cur.banker;
+        }
         this.renderTop();
         this.renderTrick();
         this.renderHand();
         this.renderButtons();
+        this.renderTimerState();
+        this.renderSettlement();
+    }
+
+    // ==================== 出牌倒计时 ====================
+
+    /**
+     * 服务端每条命令后都推全量快照，所以不能每次快照都重置倒计时——
+     * 用「局号|阶段|轮到谁」作 key，只有轮替发生时才重新计 30s。
+     */
+    private renderTimerState(): void {
+        const s = this.snap;
+        const key = s ? `${s.gameNumber}|${s.phase}|${s.turn}` : '';
+        if (key === this.timerKey) return;
+        this.timerKey = key;
+        this.timerDeadline = (s && s.phase === 'PLAYING' && s.turn === this.mySeat)
+            ? Date.now() + TableUI.TURN_SECONDS * 1000
+            : 0;
+    }
+
+    update(_dt: number): void {
+        // 结算面板到期自动收起（出锅常驻除外）
+        if (this.settleNode && Date.now() >= this.settleVisibleUntil
+            && this.snap?.phase !== 'ROUND_OVER') {
+            this.settleNode.destroy();
+            this.settleNode = null;
+        }
+        if (!this.timerDeadline) {
+            if (this.timerLabel && this.timerLabel.string !== '') this.timerLabel.string = '';
+            return;
+        }
+        const left = (this.timerDeadline - Date.now()) / 1000;
+        if (left > 0) {
+            const s = Math.ceil(left);
+            this.timerLabel.string = `剩 ${s}s`;
+            this.timerLabel.color = s <= 5
+                ? new Color(220, 45, 45, 255)
+                : new Color(235, 145, 25, 255);
+        } else {
+            this.timerLabel.string = '已超时';
+            this.timerLabel.color = new Color(150, 60, 60, 255);
+        }
+    }
+
+    // ==================== 结算页（T-606） ====================
+
+    /** 结算面板：SETTLE 事件后 8s 内展示（快照紧跟事件到达）；出锅（ROUND_OVER）常驻 */
+    private renderSettlement(): void {
+        this.settleNode?.destroy();
+        this.settleNode = null;
+        const s = this.snap;
+        if (!s || !s.settlement) return;
+        const roundOver = s.phase === 'ROUND_OVER';
+        if (!roundOver && Date.now() >= this.settleVisibleUntil) return;
+        const st = s.settlement;
+
+        const overlay = new Node('settlement');
+        overlay.layer = 1 << 25;
+        overlay.addComponent(UITransform).setContentSize(1280, 720);
+        overlay.setPosition(0, 0, 0);
+        const g = overlay.addComponent(Graphics);
+        // 半透明遮罩 + 深色面板（单节点单 UIRenderer：面板文字全部拆子节点）
+        g.fillColor = new Color(0, 0, 0, 170);
+        g.fillRect(-640, -360, 1280, 720);
+        const PW = 660, PH = 420;
+        g.fillColor = new Color(28, 42, 66, 255);
+        g.roundRect(-PW / 2, -PH / 2, PW, PH, 16);
+        g.fill();
+        g.lineWidth = 3;
+        g.strokeColor = new Color(230, 170, 40, 255);
+        g.stroke();
+        this.node.addChild(overlay);
+        this.settleNode = overlay;
+
+        // 队伍归属：庄家 + 其搭档 = 庄家方，另外两家 = 抓分方
+        // 用 preSettleBanker（本局庄）：快照里的 banker 在抓分方上台后已切给下一局
+        const bankerSeat = (this.preSettleBanker ?? s.banker ?? 'NORTH') as SeatName;
+        const bankerTeam = [bankerSeat, TableUI.PARTNER[bankerSeat]];
+        const allSeats: SeatName[] = ['NORTH', 'EAST', 'SOUTH', 'WEST'];
+        const attackerTeam = allSeats.filter(x => !bankerTeam.includes(x));
+        const iAmBankerTeam = bankerTeam.includes(this.mySeat);
+
+        const gold = new Color(235, 180, 45, 255);
+        const white = new Color(235, 235, 235, 255);
+        const gray = new Color(150, 160, 175, 255);
+
+        this.addSettleText(overlay, `第 ${this.settleGameNumber || s.gameNumber} 局 · 结算`, 0, 150, 30, gold, true);
+        this.addSettleText(overlay, `庄家方 ${bankerTeam.join(' + ')}：${st.bankerScore} 分`, 0, 95, 22, white);
+        this.addSettleText(overlay, `抓分方 ${attackerTeam.join(' + ')}：${st.attackerScore} 分`, 0, 58, 22, white);
+
+        const takesColor = st.attackerTakesBank
+            ? new Color(90, 200, 110, 255) : new Color(120, 170, 235, 255);
+        this.addSettleText(overlay,
+            st.attackerTakesBank ? '抓分方上台！' : '庄家方守住',
+            0, 14, 27, takesColor, true);
+
+        let promo = '双方不升级';
+        if (st.attackerPromoted) promo = '抓分方升级';
+        else if (st.bankerPromoted) promo = '庄家方升级';
+        if (st.dugBottom) promo += ' · 抠底！底牌分×2';
+        this.addSettleText(overlay, promo, 0, -24, 19, gray);
+
+        const iWin = iAmBankerTeam ? !st.attackerTakesBank : st.attackerTakesBank;
+        this.addSettleText(overlay, iWin ? '我方胜利！' : '我方失利', 0, -85, 36,
+            iWin ? gold : new Color(130, 135, 145, 255), true);
+        this.addSettleText(overlay,
+            roundOver ? '整轮结束（出锅），本轮收官' : '下一局即将自动开始…',
+            0, -150, 15, gray);
+    }
+
+    /** 结算面板内的一行文字（子节点，避开单 UIRenderer 限制） */
+    private addSettleText(parent: Node, text: string, x: number, y: number,
+                          size: number, color: Color, bold = false): void {
+        const n = new Node('line');
+        n.layer = 1 << 25;
+        n.addComponent(UITransform).setContentSize(640, size + 8);
+        const l = n.addComponent(Label);
+        l.string = text;
+        l.fontSize = size;
+        l.lineHeight = size + 4;
+        l.color = color;
+        l.isBold = bold;
+        l.useSystemFont = true;
+        l.horizontalAlign = Label.HorizontalAlign.CENTER;
+        l.verticalAlign = Label.VerticalAlign.CENTER;
+        n.setPosition(x, y, 0);
+        parent.addChild(n);
     }
 
     private renderTop(): void {
@@ -351,10 +512,9 @@ export class TableUI extends Component {
             const ga = this.groupOf(hand[a]);
             const gb = this.groupOf(hand[b]);
             if (ga !== gb) return ga - gb;                      // 先按堆（主牌最左）
-            const ta = tierOf(hand[a]);
-            const tb = tierOf(hand[b]);
-            return tb - ta;                                     // 堆内统一从大到小（副牌 A 在左 / 主牌大王在左）
-            return hand[a].localeCompare(hand[b]);              // 同牌力多副本兜底，保证稳定
+            // 堆内统一从大到小（副牌 A 在左 / 主牌大王在左）；同 tier 返回 0，
+            // JS sort 现代引擎保证稳定，多副本顺序不变
+            return tierOf(hand[b]) - tierOf(hand[a]);
         });
         return idx;
     }
@@ -439,6 +599,13 @@ export class TableUI extends Component {
 
     private onEventToast(e: EventMsg): void {
         if (e.op === 'DEAL') return;
+        if (e.op === 'SETTLE') {
+            // 结算面板展示窗口：事件先到、快照紧随其后（renderAll 里渲染）
+            this.settleVisibleUntil = Date.now() + TableUI.SETTLE_SHOW_MS;
+            // 事件发出时结算命令已执行完，gameNumber 已 +1 → 实际结算局号要减 1
+            const gn = (e.gameNumber ?? this.snap?.gameNumber ?? 1) - 1;
+            this.settleGameNumber = Math.max(gn, 1);
+        }
         const who = e.seat ?? '';
         const what = e.cards?.length ? ` ${e.cards.map(c => cardFace(c).text).join(' ')}` : '';
         const fail = e.success === false ? ` 失败:${String(e.reason ?? '')}` : '';

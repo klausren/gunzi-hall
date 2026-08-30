@@ -85,7 +85,18 @@ export interface SnapshotMsgDown {
     };
     trickPoints?: Record<string, number>;   // 各队已捡分
     pendingTributes?: Record<string, { blood: number; receiver: string }>; // 待进贡
+    settlement?: SettlementMsg;             // 上一局结算（SETTLED 阶段读取）
     [k: string]: unknown;
+}
+
+/** 一局结算结果（服务端 RoundSettlement.Result） */
+export interface SettlementMsg {
+    attackerScore: number;      // 抓分方最终得分（含抠底×2）
+    bankerScore: number;        // 庄家方最终得分（含保底×2）
+    attackerTakesBank: boolean; // 抓分方是否上台（≥120）
+    attackerPromoted: boolean;  // 抓分方是否升级
+    bankerPromoted: boolean;    // 庄家方是否升级
+    dugBottom: boolean;         // 是否抠底
 }
 
 export interface EventMsg {
