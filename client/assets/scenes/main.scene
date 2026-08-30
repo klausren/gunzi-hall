@@ -379,7 +379,7 @@
     "_scale": 5
   },
   {
-    "__type__": "5b433D8uXhOFpeNY+fnG4pY",
+    "__type__": "9f43aEQOqhBt6+bBekKsuvs",
     "_name": "",
     "_objFlags": 0,
     "node": {
@@ -390,6 +390,7 @@
     "serverUrl": "ws://localhost:8080/ws",
     "roomId": 1001,
     "playerId": 1,
-    "_id": "f1Gunzi0NetTest0main0sc"
+    "_id": "f1Gunzi0TableUI0main0s",
+    "mySeat": "NORTH"
   }
 ]
