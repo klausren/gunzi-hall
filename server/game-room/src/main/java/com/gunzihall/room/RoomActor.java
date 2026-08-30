@@ -68,6 +68,10 @@ public final class RoomActor {
     private final long botDelayMs;
     private final AtomicBoolean drivePending = new AtomicBoolean(false);
 
+    // T-701 拟人化：bot 思考时长随机区间；未设置（max<=0）时退回固定 botDelayMs
+    private volatile long thinkMinMs = 0;
+    private volatile long thinkMaxMs = 0;
+
     /** 演示用：打到第 N 局后停在 DEALING 不再发牌 */
     private int stopAfterGames = Integer.MAX_VALUE;
 
@@ -115,6 +119,15 @@ public final class RoomActor {
 
     public void setStopAfterGames(int n) {
         this.stopAfterGames = n;
+    }
+
+    /** T-701 拟人化：bot 每次行动前的思考时长在 [minMs, maxMs] 随机（闭区间） */
+    public void setThinkTime(long minMs, long maxMs) {
+        if (maxMs < minMs || minMs < 0) {
+            throw new IllegalArgumentException("非法思考时长区间: [" + minMs + ", " + maxMs + "]");
+        }
+        this.thinkMinMs = minMs;
+        this.thinkMaxMs = maxMs;
     }
 
     public void addSink(Sink sink) {
@@ -685,7 +698,15 @@ public final class RoomActor {
                     stuck = true;
                     emit("DRIVE_ERROR", 0, false, "bot 驱动异常: " + e, List.of());
                 }
-            }, botDelayMs, TimeUnit.MILLISECONDS);
+            }, nextBotDelayMs(), TimeUnit.MILLISECONDS);
         }
+    }
+
+    /** 固定延迟（测试/演示）或拟人化随机思考时长（T-701） */
+    private long nextBotDelayMs() {
+        if (thinkMaxMs <= 0) {
+            return botDelayMs;
+        }
+        return ThreadLocalRandom.current().nextLong(thinkMinMs, thinkMaxMs + 1);
     }
 }
