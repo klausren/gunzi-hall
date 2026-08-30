@@ -1,4 +1,4 @@
-import { _decorator, Color, Component, Graphics, Label, Node, UITransform, Vec3, view } from 'cc';
+import { _decorator, Color, Component, Graphics, Label, Node, Tween, tween, UIOpacity, UITransform, Vec3, view } from 'cc';
 import { NetClient } from '../net/NetClient';
 import type { EventMsg, SeatName, SnapshotMsgDown } from '../net/Protocol';
 import { cardFace, createCardNode, createMiniCardNode, drawCardBg, SUIT_OPTIONS } from './CardUI';
@@ -6,14 +6,23 @@ import { cardFace, createCardNode, createMiniCardNode, drawCardBg, SUIT_OPTIONS 
 const { ccclass, property } = _decorator;
 
 /**
- * 牌桌主控（T-602/603/604）。设计分辨率：1280×720（屏幕半高 360）。
+ * 牌桌主控（Sprint 6 juice 版）。设计分辨率：1280×720（屏幕半高 360）。
  *
- *   顶部  y≈300  信息栏（局/阶段/级数/主牌/庄家/轮到/捡分）
- *   中部  y≈100  当前墩（四家出牌 + 座位铭牌）
- *   下部  y≈-150 操作按钮区
- *   底部  y≈-280 我的手牌（点击选中弹起）
+ * 视角旋转：以 mySeat 为底部座位（我永远在下方，出牌落点在手牌上方），
+ * 其余三家按相对位次映射到 右/上/左 插槽。
  *
- * 渲染策略（T-603 初版）：全量快照驱动重建（39 节点级，差量留后续优化）。
+ * 布局（世界坐标，屏幕 -360..360）：
+ *   顶部 y≈320/288/256   信息栏两行 + toast
+ *   上家   y≈205 铭牌（其墩牌在铭牌下方 y≈160）
+ *   左右   y≈60  铭牌（墩牌在铭牌上方 y≈105）
+ *   我     y≈-160 铭牌（墩牌 y≈-115，按钮区 y≈-30，手牌 y≈-240）
+ *
+ * 渲染策略（juice 版）：铭牌/墩牌改持久节点 + 差量动画——
+ * 快照仍是全量推送，但 renderTrick 按「座位→牌串」diff，只对新增出牌做飞入动画；
+ * 墩清空时整墩向赢家（下一轮领出者）收拢。手牌选中不再全量重建（点击即弹跳）。
+ *
+ * 动效节奏（紧凑档）：飞牌 0.18s quadOut、收墩 0.22s quadIn（0.04s 阶梯）、
+ * 按压 0.08s / 回弹 0.12s backOut、结算面板弹入 0.25s backOut。
  */
 @ccclass('TableUI')
 export class TableUI extends Component {
@@ -26,6 +35,7 @@ export class TableUI extends Component {
     private net: NetClient | null = null;
     private snap: SnapshotMsgDown | null = null;
     private selected = new Set<number>();   // 手牌下标
+    private handNodes = new Map<number, Node>();
 
     private topLabel!: Label;
     private scoreLabel!: Label;
@@ -35,6 +45,17 @@ export class TableUI extends Component {
     private handNode!: Node;
     private btnNode!: Node;
     private settleNode: Node | null = null;
+    private settleKey = '';                 // 面板内容 key：相同则不重建（避免重复弹入）
+
+    // 四家持久铭牌（呼吸高亮必须持久节点，不能每次快照重建）
+    private seatPlateG: Partial<Record<SeatName, Graphics>> = {};
+    private seatLabelC: Partial<Record<SeatName, Label>> = {};
+    private seatHaloOp: Partial<Record<SeatName, UIOpacity>> = {};
+    private plateText: Partial<Record<SeatName, string>> = {};
+
+    // 墩牌差量动画状态：座位 → 当前已展示的牌串 / 牌节点
+    private trickShown = new Map<SeatName, string>();
+    private trickNodes = new Map<SeatName, Node[]>();
 
     // 出牌倒计时（仅本地提醒；服务端无超时托管，超时不出牌 bot 会一直等）
     private timerDeadline = 0;
@@ -51,17 +72,14 @@ export class TableUI extends Component {
     /** 只有这些阶段的 banker 才是"本局"庄家（结算切庄后 DEALING/BIDDING 里已是下一局的） */
     private static readonly IN_GAME_PHASES = new Set(['BURYING', 'TRIBUTE', 'RETURN_TRIBUTE', 'PLAYING', 'SETTLING']);
 
+    /** 有"轮到谁"语义、需要呼吸高亮的阶段 */
+    private static readonly ACTION_PHASES = new Set(['BIDDING', 'BURYING', 'PLAYING', 'TRIBUTE', 'RETURN_TRIBUTE']);
+
+    private static readonly ALL_SEATS: SeatName[] = ['NORTH', 'EAST', 'SOUTH', 'WEST'];
+
     /** 对家（搭档）座位 */
     private static readonly PARTNER: Record<SeatName, SeatName> = {
         NORTH: 'SOUTH', SOUTH: 'NORTH', EAST: 'WEST', WEST: 'EAST',
-    };
-
-    // 设计分辨率 1280×720 内的布局常量
-    private static readonly SEAT_POS: Record<SeatName, Vec3> = {
-        NORTH: new Vec3(0, 180, 0),
-        SOUTH: new Vec3(0, -80, 0),
-        WEST: new Vec3(-420, 50, 0),
-        EAST: new Vec3(420, 50, 0),
     };
 
     private static readonly PHASE_TEXT: Record<string, string> = {
@@ -69,6 +87,25 @@ export class TableUI extends Component {
         PLAYING: '出牌', TRIBUTE: '进贡', RETURN_TRIBUTE: '还贡',
         SETTLING: '结算中', SETTLE: '结算', ROUND_OVER: '整轮结束',
     };
+
+    // ==================== 座位旋转（我在下方） ====================
+
+    /** 相对位次：0=我(下) 1=下家(右) 2=对家(上) 3=上家(左) */
+    private relOf(seat: SeatName): number {
+        return (TableUI.ALL_SEATS.indexOf(seat) - TableUI.ALL_SEATS.indexOf(this.mySeat) + 4) % 4;
+    }
+
+    /** 铭牌局部坐标（trickNode 子空间，trickNode 位于 (0,80)） */
+    private plateLocal(seat: SeatName): Vec3 {
+        const slots = [new Vec3(0, -240, 0), new Vec3(430, -20, 0), new Vec3(0, 125, 0), new Vec3(-430, -20, 0)];
+        return slots[this.relOf(seat)];
+    }
+
+    /** 该座位墩牌行的局部坐标（牌行中心） */
+    private trickLocal(seat: SeatName): Vec3 {
+        const slots = [new Vec3(0, -195, 0), new Vec3(430, 25, 0), new Vec3(0, 80, 0), new Vec3(-430, 25, 0)];
+        return slots[this.relOf(seat)];
+    }
 
     start(): void {
         this.buildLayout();
@@ -88,20 +125,49 @@ export class TableUI extends Component {
     // ==================== 布局骨架 ====================
 
     private buildLayout(): void {
-        // 顶部信息栏（行 1：局/阶段/级数/主牌/庄/轮）
-        const top = this.makeLabelNode('连接中…', 18, new Color(50, 50, 50, 255));
+        // 牌桌绒布背景（最先添加 = 最底层；纯 Graphics 程序化，无美术资源）
+        const felt = new Node('felt');
+        felt.layer = 1 << 25;
+        felt.addComponent(UITransform).setContentSize(1280, 720);
+        const g = felt.addComponent(Graphics);
+        // 木沿
+        g.roundRect(-634, -354, 1268, 708, 24);
+        g.lineWidth = 8;
+        g.strokeColor = new Color(96, 72, 38, 255);
+        g.stroke();
+        // 桌面基底（暗角）
+        g.roundRect(-629, -349, 1258, 698, 20);
+        g.fillColor = new Color(9, 42, 31, 255);
+        g.fill();
+        // 主桌面
+        g.roundRect(-560, -282, 1120, 564, 28);
+        g.fillColor = new Color(13, 54, 40, 255);
+        g.fill();
+        // 中心提亮椭圆（模拟灯光照射）
+        g.ellipse(0, 0, 470, 235);
+        g.fillColor = new Color(16, 61, 45, 255);
+        g.fill();
+        // 内圈金线
+        g.roundRect(-560, -282, 1120, 564, 28);
+        g.lineWidth = 1.5;
+        g.strokeColor = new Color(200, 165, 70, 60);
+        g.stroke();
+        this.node.addChild(felt);
+
+        // 顶部信息栏（行 1：局/阶段/级数/主牌/庄/轮）—— 绒布上用浅色字
+        const top = this.makeLabelNode('连接中…', 18, new Color(228, 238, 228, 255));
         top.setPosition(0, 320, 0);
         this.node.addChild(top);
         this.topLabel = top.getComponent(Label)!;
 
         // 顶部信息栏（行 2：本墩捡分 + 各家分，醒目色）
-        const score = this.makeLabelNode('', 20, new Color(220, 80, 30, 255));
+        const score = this.makeLabelNode('', 20, new Color(255, 130, 55, 255));
         score.setPosition(0, 288, 0);
         this.node.addChild(score);
         this.scoreLabel = score.getComponent(Label)!;
 
         // Toast（事件提示，叠在信息栏下方）
-        const toast = this.makeLabelNode('', 16, new Color(200, 80, 20, 255));
+        const toast = this.makeLabelNode('', 16, new Color(255, 175, 85, 255));
         toast.setPosition(0, 258, 0);
         this.node.addChild(toast);
         this.toastLabel = toast.getComponent(Label)!;
@@ -112,23 +178,91 @@ export class TableUI extends Component {
         this.node.addChild(timer);
         this.timerLabel = timer.getComponent(Label)!;
 
-        // 中部当前墩
+        // 中部：四家持久铭牌 + 墩牌（差量动画）
         this.trickNode = new Node('trick');
         this.trickNode.layer = 1 << 25;
         this.trickNode.setPosition(0, 80, 0);
         this.node.addChild(this.trickNode);
+        for (const seat of TableUI.ALL_SEATS) {
+            this.trickNode.addChild(this.makeSeatPlate(seat));
+        }
 
-        // 下部操作按钮（提到 y=-130，躲开发调试面板大约 y∈[-100,-200] 区域）
+        // 下部操作按钮（y=-30，躲开发调试面板大约 y∈[-100,-200] 区域）
         this.btnNode = new Node('buttons');
         this.btnNode.layer = 1 << 25;
         this.btnNode.setPosition(0, -30, 0);
         this.node.addChild(this.btnNode);
 
-        // 底部手牌（y=-220，调试面板关闭时牌底 y=-260<屏底-360）
+        // 底部手牌（y=-240）
         this.handNode = new Node('hand');
         this.handNode.layer = 1 << 25;
         this.handNode.setPosition(0, -240, 0);
         this.node.addChild(this.handNode);
+    }
+
+    /** 一个座位的持久铭牌：呼吸光环 + 牌面底板 + 文字 */
+    private makeSeatPlate(seat: SeatName): Node {
+        const root = new Node(`seat_${seat}`);
+        root.layer = 1 << 25;
+        root.setPosition(this.plateLocal(seat));
+
+        // 呼吸光环（双层描边模拟辉光，UIOpacity 脉动）
+        const halo = new Node('halo');
+        halo.layer = 1 << 25;
+        const hg = halo.addComponent(Graphics);
+        hg.lineWidth = 9;
+        hg.strokeColor = new Color(255, 205, 70, 60);
+        hg.roundRect(-85, -25, 170, 50, 17);
+        hg.stroke();
+        hg.lineWidth = 3;
+        hg.strokeColor = new Color(255, 205, 70, 255);
+        hg.roundRect(-85, -25, 170, 50, 17);
+        hg.stroke();
+        const hop = halo.addComponent(UIOpacity);
+        hop.opacity = 0;
+        root.addChild(halo);
+        this.seatHaloOp[seat] = hop;
+
+        // 底板（内容变化时重绘）
+        const plate = new Node('plate');
+        plate.layer = 1 << 25;
+        this.seatPlateG[seat] = plate.addComponent(Graphics);
+        root.addChild(plate);
+
+        // 文字
+        const txt = new Node('txt');
+        txt.layer = 1 << 25;
+        txt.addComponent(UITransform).setContentSize(150, 34);
+        const l = txt.addComponent(Label);
+        l.string = '';
+        l.fontSize = 15;
+        l.lineHeight = 20;
+        l.color = new Color(215, 225, 218, 255);
+        l.useSystemFont = true;
+        l.horizontalAlign = Label.HorizontalAlign.CENTER;
+        l.verticalAlign = Label.VerticalAlign.CENTER;
+        root.addChild(txt);
+        this.seatLabelC[seat] = l;
+
+        this.drawPlate(seat, seat === this.mySeat ? '我' : seat, false);
+        return root;
+    }
+
+    /** 重绘铭牌底板 + 文字（庄家金框金字） */
+    private drawPlate(seat: SeatName, text: string, banker: boolean): void {
+        const g = this.seatPlateG[seat];
+        const l = this.seatLabelC[seat];
+        if (!g || !l) return;
+        g.clear();
+        g.roundRect(-75, -17, 150, 34, 17);
+        g.fillColor = banker ? new Color(66, 50, 12, 235) : new Color(14, 25, 21, 220);
+        g.fill();
+        g.lineWidth = banker ? 2.5 : 1;
+        g.strokeColor = banker ? new Color(235, 180, 60, 255) : new Color(255, 255, 255, 45);
+        g.stroke();
+        l.string = text;
+        l.color = banker ? new Color(255, 215, 110, 255)
+            : (seat === this.mySeat ? new Color(180, 240, 190, 255) : new Color(215, 225, 218, 255));
     }
 
     private makeLabelNode(text: string, size: number, color: Color): Node {
@@ -141,23 +275,37 @@ export class TableUI extends Component {
         l.fontSize = size;
         l.lineHeight = size + 4;
         l.color = color;
-        // 系统字体：Bitmap font 可能缺字（如“庄”），“”等中文不可靠
+        // 系统字体：Bitmap font 可能缺字（如"庄"）等中文不可靠
         l.useSystemFont = true;
         l.horizontalAlign = Label.HorizontalAlign.CENTER;
         l.verticalAlign = Label.VerticalAlign.CENTER;
         return n;
     }
 
+    /** 立体按钮：底唇模拟厚度，按压时整体下沉 4px（底唇被遮住 → "按下"） */
     private makeButton(text: string, x: number, cb: () => void): Node {
         const n = new Node(`btn_${text}`);
         n.layer = 1 << 25;
         const ut = n.addComponent(UITransform);
-        ut.setContentSize(140, 48);
+        ut.setContentSize(140, 52);
         const g = n.addComponent(Graphics);
-        g.roundRect(-70, -24, 140, 48, 8);
-        g.fillColor = new Color(70, 110, 190, 255);
+        // 底唇（厚度）
+        g.roundRect(-70, -26, 140, 50, 9);
+        g.fillColor = new Color(36, 58, 104, 255);
         g.fill();
-        // Label 独立节点挂在按钮下，填满整个按钮区域
+        // 按钮面
+        g.roundRect(-70, -22, 140, 48, 9);
+        g.fillColor = new Color(72, 112, 192, 255);
+        g.fill();
+        g.lineWidth = 1;
+        g.strokeColor = new Color(150, 190, 255, 90);
+        g.stroke();
+        // 顶面高光条
+        g.roundRect(-64, 8, 128, 12, 6);
+        g.fillColor = new Color(255, 255, 255, 28);
+        g.fill();
+
+        // Label 独立子节点挂在按钮下，填满整个按钮区域
         const txt = new Node(`txt_${text}`);
         txt.layer = 1 << 25;
         const txtUt = txt.addComponent(UITransform);
@@ -173,7 +321,16 @@ export class TableUI extends Component {
         l.verticalAlign = Label.VerticalAlign.CENTER;
         n.addChild(txt);
         n.setPosition(x, 0, 0);
-        n.on(Node.EventType.TOUCH_END, cb);
+        n.on(Node.EventType.TOUCH_START, () => {
+            tween(n).to(0.06, { position: new Vec3(x, -4, 0) }, { easing: 'quadOut' }).start();
+        });
+        n.on(Node.EventType.TOUCH_END, () => {
+            tween(n).to(0.12, { position: new Vec3(x, 0, 0) }, { easing: 'backOut' }).start();
+            cb();
+        });
+        n.on(Node.EventType.TOUCH_CANCEL, () => {
+            tween(n).to(0.12, { position: new Vec3(x, 0, 0) }, { easing: 'backOut' }).start();
+        });
         this.btnNode.addChild(n);
         return n;
     }
@@ -214,8 +371,16 @@ export class TableUI extends Component {
         // 结算面板到期自动收起（出锅常驻除外）
         if (this.settleNode && Date.now() >= this.settleVisibleUntil
             && this.snap?.phase !== 'ROUND_OVER') {
-            this.settleNode.destroy();
-            this.settleNode = null;
+            this.destroySettle();
+        }
+        // 轮次呼吸高亮：当前行动者铭牌金圈脉动
+        const s = this.snap;
+        const active = s && TableUI.ACTION_PHASES.has(s.phase) ? s.turn : null;
+        const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 1000 * 5);
+        for (const seat of TableUI.ALL_SEATS) {
+            const op = this.seatHaloOp[seat];
+            if (!op) continue;
+            op.opacity = seat === active ? 80 + 150 * pulse : 0;
         }
         if (!this.timerDeadline) {
             if (this.timerLabel && this.timerLabel.string !== '') this.timerLabel.string = '';
@@ -223,14 +388,14 @@ export class TableUI extends Component {
         }
         const left = (this.timerDeadline - Date.now()) / 1000;
         if (left > 0) {
-            const s = Math.ceil(left);
-            this.timerLabel.string = `剩 ${s}s`;
-            this.timerLabel.color = s <= 5
-                ? new Color(220, 45, 45, 255)
+            const sec = Math.ceil(left);
+            this.timerLabel.string = `剩 ${sec}s`;
+            this.timerLabel.color = sec <= 5
+                ? new Color(255, 70, 70, 255)
                 : new Color(235, 145, 25, 255);
         } else {
             this.timerLabel.string = '已超时';
-            this.timerLabel.color = new Color(150, 60, 60, 255);
+            this.timerLabel.color = new Color(200, 90, 90, 255);
         }
     }
 
@@ -238,13 +403,22 @@ export class TableUI extends Component {
 
     /** 结算面板：SETTLE 事件后 8s 内展示（快照紧跟事件到达）；出锅（ROUND_OVER）常驻 */
     private renderSettlement(): void {
-        this.settleNode?.destroy();
-        this.settleNode = null;
         const s = this.snap;
-        if (!s || !s.settlement) return;
+        if (!s || !s.settlement) {
+            if (this.settleNode) this.destroySettle();
+            return;
+        }
         const roundOver = s.phase === 'ROUND_OVER';
-        if (!roundOver && Date.now() >= this.settleVisibleUntil) return;
+        if (!roundOver && Date.now() >= this.settleVisibleUntil) {
+            if (this.settleNode) this.destroySettle();
+            return;
+        }
         const st = s.settlement;
+        // 内容没变且面板还活着：不重建（否则每张快照都重新弹入一次）
+        const key = `${this.settleGameNumber}|${st.bankerScore}|${st.attackerScore}|${st.attackerTakesBank}|${roundOver}`;
+        if (this.settleNode && key === this.settleKey) return;
+        this.destroySettle();
+        this.settleKey = key;
 
         const overlay = new Node('settlement');
         overlay.layer = 1 << 25;
@@ -298,6 +472,23 @@ export class TableUI extends Component {
         this.addSettleText(overlay,
             roundOver ? '整轮结束（出锅），本轮收官' : '下一局即将自动开始…',
             0, -150, 15, gray);
+
+        // 弹入：缩放 0.72→1 backOut + 淡入
+        overlay.setScale(0.72, 0.72, 1);
+        const op = overlay.addComponent(UIOpacity);
+        op.opacity = 0;
+        tween(overlay).to(0.25, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
+        tween(op).to(0.2, { opacity: 255 }).start();
+    }
+
+    private destroySettle(): void {
+        if (!this.settleNode) return;
+        const op = this.settleNode.getComponent(UIOpacity);
+        if (op) Tween.stopAllByTarget(op);
+        Tween.stopAllByTarget(this.settleNode);
+        this.settleNode.destroy();
+        this.settleNode = null;
+        this.settleKey = '';
     }
 
     /** 结算面板内的一行文字（子节点，避开单 UIRenderer 限制） */
@@ -342,20 +533,25 @@ export class TableUI extends Component {
             : '本墩暂未捡分';
     }
 
+    // ==================== 墩牌（差量动画） ====================
+
     private renderTrick(): void {
-        this.trickNode.removeAllChildren();
         const s = this.snap;
         if (!s) return;
 
-        // 四家座位铭牌 + 余牌数
-        if (s.hands) {
-            for (const seat of Object.keys(s.hands) as SeatName[]) {
-                const l = this.makeSeatLabel(`${seat}(${s.hands[seat]})`, seat, false);
-                this.trickNode.addChild(l);
+        // 铭牌：座位名 + 余牌数 + 庄标记（结算切庄后沿用本局庄）
+        const bankerNow = TableUI.IN_GAME_PHASES.has(s.phase) ? s.banker : this.preSettleBanker;
+        for (const seat of TableUI.ALL_SEATS) {
+            const cnt = s.hands?.[seat];
+            const name = seat === this.mySeat ? '我' : seat;
+            const txt = `${bankerNow === seat ? '庄·' : ''}${name}${cnt != null ? `(${cnt})` : ''}`;
+            if (txt !== this.plateText[seat]) {
+                this.plateText[seat] = txt;
+                this.drawPlate(seat, txt, bankerNow === seat);
             }
         }
 
-        // 当前墩出牌：用迷你牌（真实牌面 + 花色）显示在每家铭牌上方
+        // 当前墩出牌：差量比较，新增的飞入，消失的清掉
         const plays: Array<{ seat: SeatName; cards: string[] }> = [];
         if (s.trick?.plays && s.trick.plays.length > 0) {
             for (const p of s.trick.plays) {
@@ -364,45 +560,90 @@ export class TableUI extends Component {
         } else if (s.trick?.leader && s.trick.leadCards) {
             plays.push({ seat: s.trick.leader as SeatName, cards: s.trick.leadCards });
         }
+
+        if (plays.length === 0) {
+            // 墩被收走：整墩向赢家（= 下一轮领出者）方向收拢
+            if (this.trickShown.size > 0) this.collectTrick(s.turn ?? null);
+            this.trickShown.clear();
+            return;
+        }
+        for (const seat of [...this.trickShown.keys()]) {
+            if (!plays.some(p => p.seat === seat)) {
+                this.destroySeatCards(seat);
+                this.trickShown.delete(seat);
+            }
+        }
         for (const p of plays) {
-            this.renderPlacedCards(p.seat, p.cards);
+            const key = p.cards.join('.');
+            if (this.trickShown.get(p.seat) === key) continue;
+            this.destroySeatCards(p.seat);
+            this.flyIn(p.seat, p.cards);
+            this.trickShown.set(p.seat, key);
         }
     }
 
-    /** 在指定座位铭牌上方横排渲染一组牌（多张时摊开） */
-    private renderPlacedCards(seat: SeatName, cards: string[]): void {
-        const pos = TableUI.SEAT_POS[seat];
-        const spacing = 22;   // 迷你牌 32 宽 + 间隔
+    /** 出牌飞入：我的牌从手牌区放大态起飞落定；别人的牌从其铭牌处飞出 */
+    private flyIn(seat: SeatName, cards: string[]): void {
+        const base = this.trickLocal(seat);
+        const spacing = 22;
         const totalW = (cards.length - 1) * spacing;
+        const mine = seat === this.mySeat;
+        const plate = this.plateLocal(seat);
+        const nodes: Node[] = [];
         for (let i = 0; i < cards.length; i++) {
             const c = createMiniCardNode(cards[i]);
-            // 位于铭牌上方 32px（让出 26px 铭牌 + 6px 间隙）；多张牌居中横排
-            c.setPosition(pos.x - totalW / 2 + i * spacing, pos.y + 32, 0);
+            const dst = new Vec3(base.x - totalW / 2 + i * spacing, base.y, 0);
+            const from = mine ? new Vec3(dst.x, -330, 0) : new Vec3(plate.x, plate.y, 0);
+            c.setPosition(from);
+            if (mine) c.setScale(1.5, 1.5, 1);
             this.trickNode.addChild(c);
+            const delay = i * 0.06;   // 多张牌阶梯起飞
+            tween(c).delay(delay).to(0.18, { position: dst }, { easing: 'quadOut' }).start();
+            if (mine) {
+                tween(c).delay(delay).to(0.18, { scale: new Vec3(1, 1, 1) }, { easing: 'quadOut' }).start();
+            }
+            nodes.push(c);
         }
+        this.trickNodes.set(seat, nodes);
     }
 
-    private makeSeatLabel(text: string, seat: SeatName, isPlay = false): Node {
-        const n = new Node(`seat_${seat}`);
-        n.layer = 1 << 25;
-        const ut = n.addComponent(UITransform);
-        ut.setContentSize(200, isPlay ? 36 : 26);
-        const l = n.addComponent(Label);
-        l.string = text;
-        l.fontSize = isPlay ? 18 : 14;
-        l.lineHeight = isPlay ? 26 : 20;
-        l.color = isPlay ? new Color(20, 20, 20, 255) : new Color(120, 120, 120, 255);
-        l.useSystemFont = true;
-        l.horizontalAlign = Label.HorizontalAlign.CENTER;
-        l.verticalAlign = Label.VerticalAlign.CENTER;
-        const pos = TableUI.SEAT_POS[seat];
-        // 出牌显示在铭牌上方
-        n.setPosition(pos.x, pos.y + (isPlay ? 26 : 0), 0);
-        return n;
+    /** 整墩牌向赢家方向收拢消失（阶梯 0.04s） */
+    private collectTrick(winner: SeatName | null): void {
+        const target = winner ? this.plateLocal(winner) : new Vec3(0, 40, 0);
+        let i = 0;
+        for (const [, nodes] of this.trickNodes) {
+            for (const nd of nodes) {
+                const delay = (i++) * 0.04;
+                const op = nd.getComponent(UIOpacity) ?? nd.addComponent(UIOpacity);
+                tween(nd).delay(delay)
+                    .to(0.22, { position: target, scale: new Vec3(0.35, 0.35, 1) }, { easing: 'quadIn' })
+                    .call(() => nd.destroy())
+                    .start();
+                tween(op).delay(delay).to(0.22, { opacity: 0 }).start();
+            }
+        }
+        this.trickNodes.clear();
     }
+
+    private destroySeatCards(seat: SeatName): void {
+        const nodes = this.trickNodes.get(seat);
+        if (!nodes) return;
+        for (const n of nodes) {
+            const op = n.getComponent(UIOpacity);
+            if (op) Tween.stopAllByTarget(op);
+            Tween.stopAllByTarget(n);
+            n.destroy();
+        }
+        this.trickNodes.delete(seat);
+    }
+
+    // ==================== 手牌 ====================
 
     private renderHand(): void {
+        // 旧节点可能还有按压回弹动画在跑：先停 tween 再销毁，避免操作已销毁节点
+        for (const n of this.handNodes.values()) Tween.stopAllByTarget(n);
         this.handNode.removeAllChildren();
+        this.handNodes.clear();
         const hand = this.snap?.yourHand ?? [];
         const n = hand.length;
         if (n === 0) return;
@@ -432,14 +673,31 @@ export class TableUI extends Component {
             // 牌面 56 宽但间距 44 互相重叠：命中区缩为一张 spacing 宽，
             // 否则点牌的右侧露出部分会命中叠在上面的右边那张（视觉错位）
             card.getComponent(UITransform)!.setContentSize(Math.min(spacing, cardW), 80);
+            // 点击手感：按下缩、松手回弹 + 选中弹起（不再全量重建手牌）
+            card.on(Node.EventType.TOUCH_START, () => {
+                tween(card).to(0.08, { scale: new Vec3(0.94, 0.94, 1) }, { easing: 'quadOut' }).start();
+            });
             card.on(Node.EventType.TOUCH_END, () => {
-                if (this.selected.has(idx)) this.selected.delete(idx);
-                else this.selected.add(idx);
-                this.renderHand();
+                tween(card).to(0.12, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
+                this.toggleSelect(idx, card);
+            });
+            card.on(Node.EventType.TOUCH_CANCEL, () => {
+                tween(card).to(0.12, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
             });
             this.handNode.addChild(card);
+            this.handNodes.set(idx, card);
             x += spacing;
         }
+    }
+
+    /** 选中/取消选中一张牌：只动这一张节点（弹起 + 金框），不重建整手 */
+    private toggleSelect(idx: number, card: Node): void {
+        const on = this.selected.has(idx);
+        if (on) this.selected.delete(idx);
+        else this.selected.add(idx);
+        drawCardBg(card, !on);
+        tween(card).to(0.12, { position: new Vec3(card.position.x, !on ? 18 : 0, 0) },
+            { easing: 'backOut' }).start();
     }
 
     // ==================== 手牌排序（主牌一堆 + 副牌按花色分堆） ====================
@@ -527,6 +785,8 @@ export class TableUI extends Component {
     // ==================== 阶段操作按钮 ====================
 
     private renderButtons(): void {
+        // 旧按钮可能有按压动画在跑：先停 tween 再清
+        this.btnNode.children.forEach(c => Tween.stopAllByTarget(c));
         this.btnNode.removeAllChildren();
         const s = this.snap;
         if (!s) return;
@@ -614,6 +874,6 @@ export class TableUI extends Component {
 
     private showToast(text: string, warn = false): void {
         this.toastLabel.string = text;
-        this.toastLabel.color = warn ? new Color(200, 30, 30, 255) : new Color(160, 100, 20, 255);
+        this.toastLabel.color = warn ? new Color(255, 95, 95, 255) : new Color(255, 175, 85, 255);
     }
 }

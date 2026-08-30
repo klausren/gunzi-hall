@@ -87,6 +87,11 @@ export function createMiniCardNode(code: string): Node {
 
     const g = node.addComponent(Graphics);
     g.clear();
+    // 投影（同主牌：右下偏移暗色底）
+    g.roundRect(-W / 2 + 2, -H / 2 - 3, W, H, 4);
+    g.fillColor = new Color(0, 0, 0, 50);
+    g.fill();
+    // 牌体
     g.roundRect(-W / 2, -H / 2, W, H, 4);
     g.fillColor = new Color(250, 250, 245, 255);
     g.fill();
@@ -147,11 +152,16 @@ function addFaceLabel(parent: Node, text: string, x: number, y: number,
     parent.addChild(n);
 }
 
-/** 重绘牌背（选中 = 金色粗边框） */
+/** 重绘牌背（选中 = 金色粗边框 + 投影加深，强化"抬起"感） */
 export function drawCardBg(node: Node, selected: boolean): void {
     let g = node.getComponent(Graphics);
     if (!g) g = node.addComponent(Graphics);
     g.clear();
+    // 投影：右下偏移的暗色圆角矩形（重叠手牌会产生自然的堆叠层次）
+    g.roundRect(-CARD_W / 2 + 3, -CARD_H / 2 - 4, CARD_W, CARD_H, 6);
+    g.fillColor = new Color(0, 0, 0, selected ? 100 : 55);
+    g.fill();
+    // 牌体
     g.roundRect(-CARD_W / 2, -CARD_H / 2, CARD_W, CARD_H, 6);
     g.fillColor = new Color(250, 250, 245, 255);
     g.fill();
