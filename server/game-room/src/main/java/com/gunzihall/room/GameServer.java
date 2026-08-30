@@ -23,13 +23,19 @@ public final class GameServer {
 
     private final int port;
     private final RoomManager manager;
+    private final SessionRegistry sessions;
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private Channel serverChannel;
 
     public GameServer(int port, RoomManager manager) {
+        this(port, manager, new SessionRegistry());
+    }
+
+    public GameServer(int port, RoomManager manager, SessionRegistry sessions) {
         this.port = port;
         this.manager = manager;
+        this.sessions = sessions;
     }
 
     public int start() throws InterruptedException {
@@ -47,7 +53,7 @@ public final class GameServer {
                                 .addLast(new HttpObjectAggregator(65536))
                                 .addLast(new WebSocketServerProtocolHandler("/ws", null, true))
                                 .addLast(new IdleStateHandler(90, 0, 0))
-                                .addLast(new WsServerHandler(manager));
+                                .addLast(new WsServerHandler(manager, sessions));
                     }
                 });
         serverChannel = b.bind(port).sync().channel();

@@ -10,19 +10,21 @@ import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.AttributeKey;
 
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * WebSocket 帧处理：JSON 消息路由 + 心跳 + 会话生命周期。
+ * WebSocket 帧处理：JSON 消息路由 + 心跳 + 会话生命周期 + 令牌鉴权。
  * <p>客户端协议：
  * <pre>
  * {"op":"join","roomId":1001,"playerId":1,"seat":"NORTH"}
+ *     → {"type":"joined",...,"token":"abc123..."}（token 必须保存，后续消息必带）
  * {"op":"ping"}                                        → {"type":"pong"}
- * {"op":"snapshot","roomId":1001,"playerId":1}
- * {"op":"cmd","type":"PLAY","roomId":1001,"playerId":1,"cards":["H5"]}
+ * {"op":"snapshot","roomId":1001,"token":"abc..."}
+ * {"op":"cmd","type":"PLAY","roomId":1001,"token":"abc...","cards":["H5"]}
  * </pre>
+ * <p>鉴权规则：cmd/snapshot 以 token 解析出的 playerId 为准，
+ * 客户端上报的 playerId 被忽略（防冒充）。
  */
 public final class WsServerHandler extends SimpleChannelInboundHandler<TextWebSocketFrame> {
 
@@ -30,11 +32,13 @@ public final class WsServerHandler extends SimpleChannelInboundHandler<TextWebSo
             AttributeKey.valueOf("gunzi.sink");
 
     private final RoomManager manager;
-    /** channel → playerId（断线时反查解绑） */
+    private final SessionRegistry sessions;
+    /** channel → playerId（诊断用） */
     private final Map<Channel, Long> bound = new ConcurrentHashMap<>();
 
-    public WsServerHandler(RoomManager manager) {
+    public WsServerHandler(RoomManager manager, SessionRegistry sessions) {
         this.manager = manager;
+        this.sessions = sessions;
     }
 
     @Override
@@ -54,7 +58,7 @@ public final class WsServerHandler extends SimpleChannelInboundHandler<TextWebSo
         switch (msg.op()) {
             case "ping" -> send(ctx, JsonUtil.write(Map.of("type", "pong")));
             case "join" -> handleJoin(ctx, msg);
-            case "snapshot" -> manager.snapshot(msg.roomId(), msg.playerId(), sinkOf(ctx, msg));
+            case "snapshot" -> handleSnapshot(ctx, msg);
             case "cmd" -> handleCmd(ctx, msg);
             default -> send(ctx, JsonUtil.write(Map.of("type", "error", "reason", "未知 op: " + msg.op())));
         }
@@ -65,10 +69,29 @@ public final class WsServerHandler extends SimpleChannelInboundHandler<TextWebSo
             send(ctx, JsonUtil.write(Map.of("type", "error", "reason", "join 需要 roomId/playerId/seat")));
             return;
         }
-        ChannelSink sink = sinkOf(ctx, msg);
+        ChannelSink sink = sinkOf(ctx, msg.playerId());
         String reply = manager.join(msg.roomId(), msg.playerId(), Seat.valueOf(msg.seat()), sink);
-        // join 回执（成功 joined / 失败 error）总是发送给发起方
+        // join 回执：成功时签发会话令牌（后续 cmd/snapshot 必带）
+        try {
+            Map<String, Object> m = JsonUtil.read(reply, Map.class);
+            if ("joined".equals(m.get("type"))) {
+                String token = sessions.issue(msg.roomId(), msg.playerId());
+                m.put("token", token);
+                reply = JsonUtil.write(m);
+            }
+        } catch (Exception ignore) {
+            // reply 不是 JSON（不应发生），原样发送
+        }
         send(ctx, reply);
+    }
+
+    private void handleSnapshot(ChannelHandlerContext ctx, ClientMsg msg) {
+        long authId = sessions.verify(msg.token(), msg.roomId());
+        if (authId < 0) {
+            send(ctx, JsonUtil.write(Map.of("type", "error", "reason", "无效或缺失 token，请重新 join")));
+            return;
+        }
+        manager.snapshot(msg.roomId(), authId, sinkOf(ctx, authId));
     }
 
     private void handleCmd(ChannelHandlerContext ctx, ClientMsg msg) {
@@ -76,18 +99,24 @@ public final class WsServerHandler extends SimpleChannelInboundHandler<TextWebSo
             send(ctx, JsonUtil.write(Map.of("type", "error", "reason", "cmd 需要 type 字段")));
             return;
         }
-        ChannelSink sink = sinkOf(ctx, msg);
+        long authId = sessions.verify(msg.token(), msg.roomId());
+        if (authId < 0) {
+            send(ctx, JsonUtil.write(Map.of("type", "error", "reason", "无效或缺失 token，请重新 join")));
+            return;
+        }
+        // playerId 以 token 解析结果为准，忽略客户端上报（防冒充）
+        ChannelSink sink = sinkOf(ctx, authId);
         manager.route(msg.roomId(), new RoomActor.CommandSpec(
-                msg.type(), msg.playerId(), msg.cards(), msg.suit(), msg.payee(), msg.indexes(), msg.seed()), sink);
+                msg.type(), authId, msg.cards(), msg.suit(), msg.payee(), msg.indexes(), msg.seed()), sink);
     }
 
-    private ChannelSink sinkOf(ChannelHandlerContext ctx, ClientMsg msg) {
+    private ChannelSink sinkOf(ChannelHandlerContext ctx, long playerId) {
         ChannelSink sink = ctx.channel().attr(SINK).get();
         if (sink == null) {
-            sink = new ChannelSink(ctx.channel(), msg.playerId());
+            sink = new ChannelSink(ctx.channel(), playerId);
             ctx.channel().attr(SINK).set(sink);
         } else {
-            sink.playerId = msg.playerId();
+            sink.playerId = playerId;
         }
         return sink;
     }

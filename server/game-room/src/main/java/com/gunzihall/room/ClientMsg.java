@@ -16,7 +16,8 @@ public record ClientMsg(
         String payee,
         List<String> cards,
         List<Integer> indexes,
-        Long seed) {
+        Long seed,
+        String token) {
 
     public ClientMsg {
         // record 反序列化时 null 容器字段统一成空值防 NPE
