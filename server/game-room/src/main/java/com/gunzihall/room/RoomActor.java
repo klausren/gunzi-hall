@@ -202,11 +202,12 @@ public final class RoomActor {
     private void handleSpec(CommandSpec spec, boolean replay) {
         long pid = spec.playerId();
         switch (spec.op()) {
-            case "DEAL" -> applyLogged(
-                    new ShuffleAndDealCommand(roomId, pid,
-                            spec.seed() != null ? spec.seed() : newSeed()),
-                    "DEAL", pid, logOf("DEAL", pid, spec.cards(), spec.suit(), null, null, spec.seed()),
-                    List.of());
+            case "DEAL" -> {
+                long seed = spec.seed() != null ? spec.seed() : newSeed();
+                applyLogged(new ShuffleAndDealCommand(roomId, pid, seed),
+                        "DEAL", pid, logOf("DEAL", pid, spec.cards(), spec.suit(), null, null, seed),
+                        List.of());
+            }
             case "REVEAL" -> applyLogged(
                     new RevealTrumpCommand(roomId, pid, CardCodec.decodeAll(spec.cards()),
                             Suit.valueOf(spec.suit())),
@@ -263,6 +264,20 @@ public final class RoomActor {
         } finally {
             replaying = false;
         }
+    }
+
+    /**
+     * 日志重放完成后恢复驱动（服务重启恢复场景）。
+     * <p>不能走 {@link #start()}——它会重新发牌毁掉恢复出的牌局；
+     * 只需标记已开局并恢复 bot 驱动循环（轮到真人时 step 自然返回 false 等待）。
+     */
+    void resumeAfterRestore() {
+        runInThread(() -> {
+            if (!started && room.gameNumber() > 0) {
+                started = true;
+                scheduleDrive();
+            }
+        });
     }
 
     // ================= bot 驱动状态机 =================

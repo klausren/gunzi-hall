@@ -50,8 +50,8 @@ public final class TributeCommand extends AbstractGameCommand {
         if (cards.size() != obligation.bloodCount()) {
             return CommandResult.fail("进贡张数不对：应交 " + obligation.bloodCount() + " 张，实交 " + cards.size());
         }
-        if (!player.hand().containsAll(cards)) {
-            return CommandResult.fail("所贡之牌不在手牌中");
+        if (!com.gunzihall.domain.card.Cards.containsCopies(player.hand(), cards)) {
+            return CommandResult.fail("所贡之牌不在手牌中（按副本数校验）");
         }
         TrumpContext trump = room.trump().orElse(null);
         if (trump == null) {

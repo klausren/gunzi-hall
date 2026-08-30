@@ -64,8 +64,8 @@ public final class RevealTrumpCommand extends AbstractGameCommand {
         if (cards.isEmpty() || cards.size() > 3) {
             return CommandResult.fail("亮王牌数必须 1..3 张");
         }
-        if (!player.hand().containsAll(cards)) {
-            return CommandResult.fail("所亮之牌不在手牌中");
+        if (!com.gunzihall.domain.card.Cards.containsCopies(player.hand(), cards)) {
+            return CommandResult.fail("所亮之牌不在手牌中（按副本数校验：手里实际张数不足）");
         }
 
         TrumpReveal candidate;

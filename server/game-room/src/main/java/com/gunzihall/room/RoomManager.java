@@ -142,6 +142,11 @@ public final class RoomManager {
                 actor.replaySpec(toSpec(op, playerId, m));
             }
         }
+        // 日志中已有发牌 → 牌局进行过，恢复 bot 驱动（不重新发牌）
+        boolean dealt = log.stream().anyMatch(e -> e.contains("\"op\":\"DEAL\""));
+        if (dealt) {
+            actor.resumeAfterRestore();
+        }
         return actor;
     }
 

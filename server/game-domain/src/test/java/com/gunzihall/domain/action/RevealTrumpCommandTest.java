@@ -208,6 +208,38 @@ class RevealTrumpCommandTest {
         assertTrue(r.isFailure());
     }
 
+    // ---- 防虚报：声明副本数必须与手牌实际副本数一致（三副牌值对象陷阱） ----
+
+    @Test
+    void cannotClaimTripleJokersWithFewerCopies() {
+        laterRoundPrep();
+        // 北家先亮 1 张级牌立主
+        Player north = playerOf(room, Seat.NORTH);
+        addToHand(north, Card.of(Suit.SPADE, 6));
+        assertTrue(room.apply(new RevealTrumpCommand(1001L, 1L,
+                List.of(Card.of(Suit.SPADE, 6)), Suit.SPADE)).success());
+
+        // 东家手里只有 1 张大王，虚报 3 张大王反主 → 必须被拒
+        Player east = playerOf(room, Seat.EAST);
+        addToHand(east, Card.bigJoker());
+        var r = room.apply(new RevealTrumpCommand(1001L, 2L,
+                List.of(Card.bigJoker(), Card.bigJoker(), Card.bigJoker()), Suit.CLUB));
+        assertTrue(r.isFailure());
+        assertEquals(Suit.SPADE, room.trump().orElseThrow().trumpSuit());
+    }
+
+    @Test
+    void cannotClaimTripleLevelCardsWithFewerCopies() {
+        laterRoundPrep();
+        // 北家手里只有 1 张 ♠6，虚报 3 张 ♠6 → 必须被拒
+        Player north = playerOf(room, Seat.NORTH);
+        addToHand(north, Card.of(Suit.SPADE, 6));
+        var r = room.apply(new RevealTrumpCommand(1001L, 1L,
+                List.of(Card.of(Suit.SPADE, 6), Card.of(Suit.SPADE, 6), Card.of(Suit.SPADE, 6)),
+                Suit.SPADE));
+        assertTrue(r.isFailure());
+    }
+
     // ---- 阶段约束 ----
 
     @Test
