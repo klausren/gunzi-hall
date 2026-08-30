@@ -1,7 +1,7 @@
 import { _decorator, Color, Component, Graphics, Label, Node, UITransform, Vec3 } from 'cc';
 import { NetClient } from '../net/NetClient';
 import type { EventMsg, SeatName, SnapshotMsgDown } from '../net/Protocol';
-import { createCardNode, createMiniCardNode, drawCardBg, SUIT_OPTIONS } from './CardUI';
+import { cardFace, createCardNode, createMiniCardNode, drawCardBg, SUIT_OPTIONS } from './CardUI';
 
 const { ccclass, property } = _decorator;
 
@@ -248,23 +248,114 @@ export class TableUI extends Component {
         // 39 张牌在 1280 宽度内排开（牌宽 56），spacing 按可用宽度计算
         const cardW = 56;
         const maxSpread = 1100;
-        const spacing = n > 1 ? Math.min(cardW - 12, (maxSpread - cardW) / (n - 1)) : cardW;
-        const total = spacing * (n - 1);
+        const gap = 16;   // 组间额外间隙（副牌按花色分堆 + 主牌一堆）
+        const groups = this.groupCount(hand);
+        const gapTotal = Math.max(groups - 1, 0) * gap;
+        const spacing = n > 1 ? Math.min(cardW - 12, (maxSpread - cardW - gapTotal) / (n - 1)) : cardW;
+        const total = spacing * (n - 1) + gapTotal;
+
+        // 排序后的显示顺序（原始下标数组），选中仍按原始下标记
+        const order = this.sortHand(hand);
+        let x = -total / 2;
+        let prevGroup = -1;
         for (let i = 0; i < n; i++) {
-            const card = createCardNode(hand[i]);
-            const selected = this.selected.has(i);
-            card.setPosition(-total / 2 + i * spacing, selected ? 18 : 0, 0);
+            const idx = order[i];
+            const g = this.groupOf(hand[idx]);
+            if (i > 0 && g !== prevGroup) x += gap;   // 换组加间隙
+            prevGroup = g;
+            const card = createCardNode(hand[idx]);
+            const selected = this.selected.has(idx);
+            card.setPosition(x, selected ? 18 : 0, 0);
             if (selected) drawCardBg(card, true);
             // 牌面 56 宽但间距 44 互相重叠：命中区缩为一张 spacing 宽，
             // 否则点牌的右侧露出部分会命中叠在上面的右边那张（视觉错位）
             card.getComponent(UITransform)!.setContentSize(Math.min(spacing, cardW), 80);
             card.on(Node.EventType.TOUCH_END, () => {
-                if (this.selected.has(i)) this.selected.delete(i);
-                else this.selected.add(i);
+                if (this.selected.has(idx)) this.selected.delete(idx);
+                else this.selected.add(idx);
                 this.renderHand();
             });
             this.handNode.addChild(card);
+            x += spacing;
         }
+    }
+
+    // ==================== 手牌排序（主牌一堆 + 副牌按花色分堆） ====================
+
+    /** 服务端花色名 → 牌编码首字符 */
+    private static readonly SUIT_CHAR: Record<string, string> = {
+        SPADE: 'S', HEART: 'H', DIAMOND: 'D', CLUB: 'C',
+    };
+    /** 副牌堆从左到右的花色顺序（主花色会被抽到主牌堆） */
+    private static readonly SIDE_ORDER = ['S', 'H', 'D', 'C'];
+
+    private parseCode(code: string): { suit: string; rank: number; joker: number } {
+        if (code === 'BJ') return { suit: '', rank: 0, joker: 2 };
+        if (code === 'SJ') return { suit: '', rank: 0, joker: 1 };
+        return { suit: code[0], rank: parseInt(code.slice(1), 10), joker: 0 };
+    }
+
+    /**
+     * 手册 2.1 主牌判定（与服务端 CardTier.isTrump 对齐）：
+     * 王、所有 2（常主）、所有级牌、主花色牌。定主前（trump 空）无主牌堆。
+     */
+    private isTrumpCard(code: string): boolean {
+        const t = this.snap?.trump;
+        if (!t) return false;
+        const { suit, rank, joker } = this.parseCode(code);
+        if (joker > 0) return true;
+        if (rank === t.level) return true;
+        if (rank === 2) return true;
+        return suit === (TableUI.SUIT_CHAR[t.suit] ?? '');
+    }
+
+    /**
+     * 分组号：0..3 = 副牌四堆（按 SIDE_ORDER），4 = 主牌堆（最右）。
+     * 定主前无主牌堆，全部按花色分堆。
+     */
+    private groupOf(code: string): number {
+        const { suit, joker } = this.parseCode(code);
+        if (joker > 0) return 4;   // 王恒在最右堆：无主时单独一堆，定主后并入主牌堆
+        if (this.isTrumpCard(code)) return 4;
+        const g = TableUI.SIDE_ORDER.indexOf(suit);
+        return g >= 0 ? g : 3;
+    }
+
+    private groupCount(hand: string[]): number {
+        const set = new Set<number>();
+        for (const c of hand) set.add(this.groupOf(c));
+        return set.size;
+    }
+
+    /**
+     * 返回排序后的原始下标数组（显示从左到右）。
+     * 副牌堆内从大到小（A 在左）；主牌堆按手册 2.1 牌力从小到大（大王最右）。
+     */
+    private sortHand(hand: string[]): number[] {
+        const t = this.snap?.trump;
+        const tierOf = (code: string): number => {
+            const { suit, rank, joker } = this.parseCode(code);
+            if (joker === 2) return 800;
+            if (joker === 1) return 700;
+            if (!t) return rank;   // 定主前：仅按点数比较，堆内排序用
+            const trumpSuit = TableUI.SUIT_CHAR[t.suit] ?? '';
+            if (rank === t.level) return suit === trumpSuit ? 600 : 500;
+            if (rank === 2) return suit === trumpSuit ? 400 : 300;
+            // 副牌返回点数（而非服务端统一层 100）：堆内排序需要真实点数，
+            // 否则同堆 tier 全相等会掉进字符串兜底比较（D10<D13<D14<D4 字典序错误）
+            return suit === trumpSuit ? 200 + rank : rank;
+        };
+        const idx = hand.map((_, i) => i);
+        idx.sort((a, b) => {
+            const ga = this.groupOf(hand[a]);
+            const gb = this.groupOf(hand[b]);
+            if (ga !== gb) return ga - gb;                      // 先按堆（主牌最右）
+            const ta = tierOf(hand[a]);
+            const tb = tierOf(hand[b]);
+            if (ta !== tb) return ga === 4 ? ta - tb : tb - ta; // 副牌大到小 / 主牌小到大
+            return hand[a].localeCompare(hand[b]);              // 同牌力多副本兜底，保证稳定
+        });
+        return idx;
     }
 
     private selectedCodes(): string[] {
