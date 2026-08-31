@@ -387,7 +387,7 @@
     },
     "_enabled": true,
     "__prefab": null,
-    "serverUrl": "ws://localhost:8080/ws",
+    "serverUrl": "ws://10.192.0.121:8080/ws",
     "roomId": 1001,
     "playerId": 1,
     "_id": "f1Gunzi0TableUI0main0s",
