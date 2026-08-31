@@ -86,6 +86,7 @@ export class TableUI extends Component {
         WAITING: '等待中', DEALING: '发牌中', BIDDING: '亮主', BURYING: '扣底',
         PLAYING: '出牌', TRIBUTE: '进贡', RETURN_TRIBUTE: '还贡',
         SETTLING: '结算中', SETTLE: '结算', ROUND_OVER: '整轮结束',
+        AUTO: '超时托管',
     };
 
     // ==================== 座位旋转（我在下方） ====================

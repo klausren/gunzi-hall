@@ -26,8 +26,9 @@ public final class ServerMain {
         System.out.println("命令日志存储: " + store.getClass().getSimpleName());
 
         RoomManager manager = new RoomManager(store, 150);
+        manager.setThinkTime(800, 2500);   // T-701 拟人化：bot 每步随机思考 0.8~2.5s
+        manager.setTurnTimeout(32_000);    // T-704 超时托管：真人 32s 未行动由系统代打
         RoomActor room = manager.create(roomId, Set.of(Seat.EAST, Seat.SOUTH, Seat.WEST));
-        room.setThinkTime(800, 2500); // T-701 拟人化：bot 每步随机思考 0.8~2.5s
 
         GameServer server = new GameServer(port, manager);
         int bound = server.start();

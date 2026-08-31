@@ -22,6 +22,10 @@ public final class RoomManager {
     private final RoomStateStore store;
     private final long botDelayMs;
     private final Map<Long, RoomActor> rooms = new ConcurrentHashMap<>();
+    // 房间级调参（建房与重启恢复共用，避免恢复出的房间丢配置）
+    private volatile long thinkMinMs = 0;
+    private volatile long thinkMaxMs = 0;
+    private volatile long turnTimeoutMs = 0;
 
     public RoomManager(RoomStateStore store) {
         this(store, 0);
@@ -32,12 +36,36 @@ public final class RoomManager {
         this.botDelayMs = botDelayMs;
     }
 
+    /** T-701：bot 思考时长区间（对所有房间生效，含重启恢复） */
+    public void setThinkTime(long minMs, long maxMs) {
+        this.thinkMinMs = minMs;
+        this.thinkMaxMs = maxMs;
+        rooms.values().forEach(a -> a.setThinkTime(minMs, maxMs));
+    }
+
+    /** T-704：真人超时托管时长（对所有房间生效，含重启恢复） */
+    public void setTurnTimeout(long ms) {
+        this.turnTimeoutMs = ms;
+        rooms.values().forEach(a -> a.setTurnTimeout(ms));
+    }
+
+    /** 新建房间：应用房间级调参 */
+    private void configure(RoomActor actor) {
+        if (thinkMaxMs > 0) {
+            actor.setThinkTime(thinkMinMs, thinkMaxMs);
+        }
+        if (turnTimeoutMs > 0) {
+            actor.setTurnTimeout(turnTimeoutMs);
+        }
+    }
+
     /**
      * 建房：botSeats 指定的座位由 bot 占据，其余留给真人。
      * 房满 4 人自动开局。
      */
     public RoomActor create(long roomId, Set<Seat> botSeats) {
         RoomActor actor = new RoomActor(roomId, store, botDelayMs);
+        configure(actor);
         for (Seat seat : Seat.values()) {
             if (botSeats.contains(seat)) {
                 actor.join(new BotPlayer(botId(roomId, seat), seat), true);
@@ -116,6 +144,7 @@ public final class RoomManager {
     public void detach(RoomActor.Sink sink) {
         for (RoomActor actor : rooms.values()) {
             actor.removeSink(sink);
+            actor.onSinkRemoved(); // T-704：断开可能正轮到该真人 → 唤醒驱动接管
         }
     }
 
@@ -130,6 +159,7 @@ public final class RoomManager {
             return null;
         }
         RoomActor actor = new RoomActor(roomId, store, botDelayMs);
+        configure(actor); // 恢复出的房间同样应用调参（T-701/T-704）
         for (String entry : log) {
             Map<String, Object> m = JsonUtil.read(entry, Map.class);
             String op = String.valueOf(m.get("op"));

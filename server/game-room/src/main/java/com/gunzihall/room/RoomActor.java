@@ -33,6 +33,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ThreadLocalRandom;
@@ -71,6 +72,15 @@ public final class RoomActor {
     // T-701 拟人化：bot 思考时长随机区间；未设置（max<=0）时退回固定 botDelayMs
     private volatile long thinkMinMs = 0;
     private volatile long thinkMaxMs = 0;
+
+    // T-704 超时托管：真人等待上限，归零后由 BotBrain 代打（0 = 关闭）
+    private volatile long turnTimeoutMs = 0;
+    /** 已装弹的超时任务（等待真人时装、有人行动后取消/空响） */
+    private ScheduledFuture<?> timeoutTask;
+    /** 装弹时的 actionSeq：归零时若已变化说明真人行动过 → 空响直接返回 */
+    private long timeoutArmedSeq = -1;
+    /** 每次成功命令自增，用于识别"等待状态是否还成立" */
+    private long actionSeq = 0;
 
     /** 演示用：打到第 N 局后停在 DEALING 不再发牌 */
     private int stopAfterGames = Integer.MAX_VALUE;
@@ -128,6 +138,14 @@ public final class RoomActor {
         }
         this.thinkMinMs = minMs;
         this.thinkMaxMs = maxMs;
+    }
+
+    /** T-704 超时托管：真人单步等待上限（毫秒），归零后 BotBrain 代打；<=0 关闭 */
+    public void setTurnTimeout(long ms) {
+        if (ms < 0) {
+            throw new IllegalArgumentException("非法超时时长: " + ms);
+        }
+        this.turnTimeoutMs = ms;
     }
 
     public void addSink(Sink sink) {
@@ -201,9 +219,18 @@ public final class RoomActor {
     }
 
     public void shutdown() {
+        cancelTimeout();
         if (scheduler != null) {
             scheduler.shutdownNow();
         }
+    }
+
+    /** T-704：连接断开（可能正轮到该真人行动）→ 唤醒驱动让 bot 立即接管 */
+    public void onSinkRemoved() {
+        runInThread(() -> {
+            cancelTimeout(); // 代打接管后旧超时失效
+            scheduleDrive();
+        });
     }
 
     // ================= 命令规格（客户端协议 + 重放共用） =================
@@ -413,24 +440,19 @@ public final class RoomActor {
     }
 
     private boolean stepTribute() {
-        // 1) 有义务未交：bot 交贡
+        // 1) 有义务未交：bot / 掉线真人 交贡（在线真人等其操作）
         var pendings = room.pendingTributes();
         if (!pendings.isEmpty()) {
             Seat payer = pendings.keySet().iterator().next();
             TributeObligation ob = pendings.get(payer);
-            if (!isBot(payer)) {
+            if (isHuman(payer) && seatOnline(payer)) {
                 return false; // 等真人交贡
             }
             tributeReceiver.put(payer, ob.receiver());
-            Player p = room.playerAt(payer);
-            List<Card> cards = BotBrain.tributeCards(room, p, ob.bloodCount());
-            applyLogged(new TributeCommand(roomId, p.playerId(), cards), "TRIBUTE",
-                    p.playerId(),
-                    logOf("TRIBUTE", p.playerId(), CardCodec.encodeAll(cards), null, null, null, null),
-                    cards);
+            doTribute(payer, ob.bloodCount());
             return true;
         }
-        // 2) 已收贡未还：bot 收贡人还贡
+        // 2) 已收贡未还：收贡人还贡
         for (Map.Entry<Seat, List<Card>> e : room.tributeReceived().entrySet()) {
             if (room.isTributeReturned(e.getKey())) {
                 continue;
@@ -438,18 +460,33 @@ public final class RoomActor {
             Seat payer = e.getKey();
             Seat receiverSeat = tributeReceiver.getOrDefault(payer,
                     room.bankerSeat().orElse(Seat.NORTH));
-            if (!isBot(receiverSeat)) {
+            if (isHuman(receiverSeat) && seatOnline(receiverSeat)) {
                 return false; // 等真人还贡
             }
-            Player receiver = room.playerAt(receiverSeat);
-            List<Card> cards = BotBrain.returnTributeCards(room, receiver, e.getValue().size());
-            applyLogged(new ReturnTributeCommand(roomId, receiver.playerId(), payer, cards),
-                    "RETURN_TRIBUTE", receiver.playerId(),
-                    logOf("RETURN_TRIBUTE", receiver.playerId(),
-                            CardCodec.encodeAll(cards), null, payer.name(), null, null), cards);
+            doReturnTribute(receiverSeat, payer, e.getValue().size());
             return true;
         }
         return false;
+    }
+
+    /** 交贡动作（bot / 超时托管共用） */
+    private void doTribute(Seat payer, int bloodCount) {
+        Player p = room.playerAt(payer);
+        List<Card> cards = BotBrain.tributeCards(room, p, bloodCount);
+        applyLogged(new TributeCommand(roomId, p.playerId(), cards), "TRIBUTE",
+                p.playerId(),
+                logOf("TRIBUTE", p.playerId(), CardCodec.encodeAll(cards), null, null, null, null),
+                cards);
+    }
+
+    /** 还贡动作（bot / 超时托管共用） */
+    private void doReturnTribute(Seat receiverSeat, Seat payer, int count) {
+        Player receiver = room.playerAt(receiverSeat);
+        List<Card> cards = BotBrain.returnTributeCards(room, receiver, count);
+        applyLogged(new ReturnTributeCommand(roomId, receiver.playerId(), payer, cards),
+                "RETURN_TRIBUTE", receiver.playerId(),
+                logOf("RETURN_TRIBUTE", receiver.playerId(),
+                        CardCodec.encodeAll(cards), null, payer.name(), null, null), cards);
     }
 
     private boolean stepBury() {
@@ -457,9 +494,15 @@ public final class RoomActor {
         if (bankerSeat == null) {
             return false;
         }
-        if (!isBot(bankerSeat)) {
+        if (isHuman(bankerSeat) && seatOnline(bankerSeat)) {
             return false; // 等真人扣底
         }
+        doBury(bankerSeat);
+        return true;
+    }
+
+    /** 扣底动作（bot / 超时托管共用） */
+    private void doBury(Seat bankerSeat) {
         Player banker = room.playerAt(bankerSeat);
         List<Card> combined = new ArrayList<>(banker.hand());
         if (!room.isBottomTaken()) {
@@ -478,7 +521,6 @@ public final class RoomActor {
                     logOf("BURY", banker.playerId(), CardCodec.encodeAll(original), null, null, null, null),
                     original);
         }
-        return true;
     }
 
     private boolean stepPlay() {
@@ -486,9 +528,14 @@ public final class RoomActor {
         if (turn == null) {
             return false;
         }
-        if (!isBot(turn)) {
-            return false; // 等真人出牌
+        if (isHuman(turn) && seatOnline(turn)) {
+            return false; // 等真人出牌（超时由 onHumanTimeout 代打）
         }
+        return actPlay(turn);
+    }
+
+    /** 出牌动作（bot / 掉线接管 / 超时托管共用）；返回 false = 状态损坏 */
+    private boolean actPlay(Seat turn) {
         Player p = room.playerAt(turn);
         if (p.hand().isEmpty()) {
             // PLAYING 阶段轮到出牌的人手牌为空 = 状态损坏（正常应转入 SETTLING），显式暴露
@@ -515,6 +562,129 @@ public final class RoomActor {
         return true;
     }
 
+    // ================= T-704 超时托管 =================
+
+    private boolean isHuman(Seat seat) {
+        return !isBot(seat);
+    }
+
+    /** 该座位是否有活跃连接（真人掉线 → false → bot 接管） */
+    private boolean seatOnline(Seat seat) {
+        Player p = room.players().get(seat);
+        if (p == null) {
+            return false;
+        }
+        for (Sink s : sinks) {
+            if (s.playerId() == p.playerId()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 当前驱动停在等真人行动时调用：确定等待的真人座位并装弹超时任务。
+     * 驱动循环每次停下都会重装（先取消旧的），真人行动后 actionSeq 变化使旧弹空响。
+     */
+    private void armTimeout() {
+        cancelTimeout();
+        if (turnTimeoutMs <= 0 || scheduler == null || stuck) {
+            return;
+        }
+        Seat waiter = humanWaiter();
+        if (waiter == null) {
+            return;
+        }
+        timeoutArmedSeq = actionSeq;
+        timeoutTask = scheduler.schedule(this::onHumanTimeout, turnTimeoutMs, TimeUnit.MILLISECONDS);
+    }
+
+    /** 当前在等哪个真人行动；不在等真人返回 null */
+    private Seat humanWaiter() {
+        switch (room.phase()) {
+            case PLAYING -> {
+                Seat turn = room.turnSeat().orElse(null);
+                if (turn != null && isHuman(turn)) {
+                    return turn;
+                }
+            }
+            case BURYING -> {
+                Seat banker = room.bankerSeat().orElse(null);
+                if (banker != null && isHuman(banker)) {
+                    return banker;
+                }
+            }
+            case TRIBUTE -> {
+                for (Seat payer : room.pendingTributes().keySet()) {
+                    if (isHuman(payer)) {
+                        return payer;
+                    }
+                }
+                for (Map.Entry<Seat, List<Card>> e : room.tributeReceived().entrySet()) {
+                    if (room.isTributeReturned(e.getKey())) {
+                        continue;
+                    }
+                    Seat receiver = tributeReceiver.getOrDefault(e.getKey(),
+                            room.bankerSeat().orElse(Seat.NORTH));
+                    if (isHuman(receiver)) {
+                        return receiver;
+                    }
+                }
+            }
+            default -> {
+            }
+        }
+        return null;
+    }
+
+    /** 超时到点：状态未变（无人行动）→ BotBrain 代打 */
+    private void onHumanTimeout() {
+        runInThread(() -> {
+            timeoutTask = null;
+            if (stuck || actionSeq != timeoutArmedSeq) {
+                return; // 空响：真人已行动或状态已变
+            }
+            Seat waiter = humanWaiter();
+            if (waiter == null) {
+                return;
+            }
+            Player p = room.playerAt(waiter);
+            emit("AUTO", p.playerId(), true, "超时托管：系统代打", List.of());
+            switch (room.phase()) {
+                case PLAYING -> actPlay(waiter);
+                case BURYING -> doBury(waiter);
+                case TRIBUTE -> {
+                    if (room.pendingTributes().containsKey(waiter)) {
+                        doTribute(waiter, room.pendingTributes().get(waiter).bloodCount());
+                    } else {
+                        for (Map.Entry<Seat, List<Card>> e : room.tributeReceived().entrySet()) {
+                            if (room.isTributeReturned(e.getKey())) {
+                                continue;
+                            }
+                            Seat receiver = tributeReceiver.getOrDefault(e.getKey(),
+                                    room.bankerSeat().orElse(Seat.NORTH));
+                            if (receiver == waiter) {
+                                doReturnTribute(receiver, e.getKey(), e.getValue().size());
+                                break;
+                            }
+                        }
+                    }
+                }
+                default -> {
+                }
+            }
+            scheduleDrive();
+        });
+    }
+
+    private void cancelTimeout() {
+        if (timeoutTask != null) {
+            timeoutTask.cancel(false);
+            timeoutTask = null;
+        }
+        timeoutArmedSeq = -1;
+    }
+
     // ================= 应用命令 + 留痕 + 广播 =================
 
     private CommandResult applyLogged(GameCommand cmd, String op, long playerId, String logJson,
@@ -537,6 +707,7 @@ public final class RoomActor {
             }
         } else {
             consecutiveFailures = 0;
+            actionSeq++; // T-704：任何成功行动都会让已装弹的超时任务失效
         }
         return r;
     }
@@ -692,6 +863,8 @@ public final class RoomActor {
                 try {
                     if (!stuck && step()) {
                         scheduleDrive();
+                    } else if (!stuck) {
+                        armTimeout(); // T-704：停下等真人 → 装弹超时托管
                     }
                 } catch (Exception e) {
                     // 调度器会吞掉任务异常导致驱动循环无声死亡，这里显式暴露
