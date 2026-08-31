@@ -1,6 +1,6 @@
 import { _decorator, Color, Component, Graphics, Label, Node, Tween, tween, UIOpacity, UITransform, Vec3, view } from 'cc';
 import { NetClient } from '../net/NetClient';
-import type { EventMsg, SeatName, SnapshotMsgDown } from '../net/Protocol';
+import type { EventMsg, JoinedMsg, SeatName, SnapshotMsgDown } from '../net/Protocol';
 import { cardFace, createCardNode, createMiniCardNode, drawCardBg, SUIT_OPTIONS } from './CardUI';
 
 const { ccclass, property } = _decorator;
@@ -69,6 +69,14 @@ export class TableUI extends Component {
     private preSettleBanker: SeatName | null = null; // 本局庄家（SETTLE 后快照的 banker 已是新庄，不能用）
     private static readonly SETTLE_SHOW_MS = 8000;
 
+    // 断线重连 UI（T-702）：首次连接不算"断线"，只刷顶栏；
+    // 曾连上过再掉线 → 弹全屏遮罩 + 已等待秒数；重连成功 → 关遮罩 + 恢复引导
+    private reconnectNode: Node | null = null;
+    private reconnectLabel: Label | null = null;
+    private wasOnline = false;      // 本次会话是否曾成功连上过
+    private offlineSince = 0;       // 掉线时刻（遮罩显示已等待秒数）
+    private hintMyTurnOnSnapshot = false; // 重连成功后，快照到达时提示"轮到你"
+
     /** 只有这些阶段的 banker 才是"本局"庄家（结算切庄后 DEALING/BIDDING 里已是下一局的） */
     private static readonly IN_GAME_PHASES = new Set(['BURYING', 'TRIBUTE', 'RETURN_TRIBUTE', 'PLAYING', 'SETTLING']);
 
@@ -111,16 +119,94 @@ export class TableUI extends Component {
     start(): void {
         this.buildLayout();
         this.net = new NetClient(this.serverUrl);
-        this.net.onJoined(() => this.showToast(`已入座 ${this.mySeat}`));
-        this.net.onSnapshot(s => { this.snap = s; this.renderAll(); });
+        this.net.onJoined(j => this.onJoinedMsg(j));
+        this.net.onSnapshot(s => this.onSnapshotMsg(s));
         this.net.onEvent(e => this.onEventToast(e));
         this.net.onError(r => this.showToast(`⚠ ${r}`, true));
-        this.net.onStateChange(ok => this.renderTop());
+        this.net.onStateChange(ok => this.onNetState(ok));
         this.net.join(this.roomId, this.playerId, this.mySeat);
     }
 
     onDestroy(): void {
         this.net?.close();
+    }
+
+    // ==================== 断线重连 UI（T-702） ====================
+
+    private onJoinedMsg(j: JoinedMsg): void {
+        if (j.reconnect) {
+            // 重连恢复：等快照到达后再给"轮到你"引导（此刻还没有牌局状态）
+            this.hintMyTurnOnSnapshot = true;
+            this.showToast('已重新连接，牌局已恢复');
+        } else {
+            this.showToast(`已入座 ${this.mySeat}`);
+        }
+    }
+
+    private onSnapshotMsg(s: SnapshotMsgDown): void {
+        this.snap = s;
+        this.renderAll();
+        // 重连恢复引导：快照对齐后，若正轮到我行动则明确提示
+        if (this.hintMyTurnOnSnapshot) {
+            this.hintMyTurnOnSnapshot = false;
+            if (TableUI.ACTION_PHASES.has(s.phase) && s.turn === this.mySeat) {
+                this.showToast(`轮到你${TableUI.PHASE_TEXT[s.phase] ?? '行动'}了`, true);
+            }
+        }
+    }
+
+    private onNetState(ok: boolean): void {
+        this.renderTop();
+        if (ok) {
+            if (this.wasOnline) {
+                this.hideReconnectOverlay(); // 断线重连成功
+            }
+            this.wasOnline = true;
+            return;
+        }
+        if (this.wasOnline) {
+            // 曾连上过再掉线才是"断线"（首次连接失败只刷顶栏，不弹遮罩）
+            this.offlineSince = Date.now();
+            this.showReconnectOverlay();
+        }
+    }
+
+    private showReconnectOverlay(): void {
+        if (!this.reconnectNode) {
+            // 全屏半透明遮罩（添加顺序最后 = 最顶层，盖住牌桌但透出牌局轮廓）
+            const mask = new Node('reconnect-mask');
+            mask.layer = 1 << 25;
+            mask.addComponent(UITransform).setContentSize(1280, 720);
+            const g = mask.addComponent(Graphics);
+            g.fillColor = new Color(0, 0, 0, 165);
+            g.fillRect(-640, -360, 1280, 720);
+            const title = this.makeLabelNode('', 34, new Color(255, 210, 120, 255));
+            title.setPosition(0, 30, 0);
+            mask.addChild(title);
+            this.reconnectLabel = title.getComponent(Label)!;
+            const sub = this.makeLabelNode(
+                '牌局仍在进行，恢复连接后自动回到座位', 16, new Color(200, 200, 200, 255));
+            sub.setPosition(0, -16, 0);
+            mask.addChild(sub);
+            this.node.addChild(mask);
+            this.reconnectNode = mask;
+        }
+        this.reconnectNode.active = true;
+        this.updateReconnectText();
+    }
+
+    private hideReconnectOverlay(): void {
+        if (this.reconnectNode) {
+            this.reconnectNode.active = false;
+        }
+    }
+
+    /** 遮罩文案：动画省略号 + 已等待秒数（update 里刷新） */
+    private updateReconnectText(): void {
+        if (!this.reconnectLabel) return;
+        const dots = '.'.repeat(1 + Math.floor(Date.now() / 450) % 3);
+        const waited = Math.max(0, Math.floor((Date.now() - this.offlineSince) / 1000));
+        this.reconnectLabel.string = `网络断开，正在重连${dots}（已等待 ${waited} 秒）`;
     }
 
     // ==================== 布局骨架 ====================
@@ -369,6 +455,10 @@ export class TableUI extends Component {
     }
 
     update(_dt: number): void {
+        // 重连遮罩文案刷新（动画省略号 + 已等待秒数）
+        if (this.reconnectNode && this.reconnectNode.active) {
+            this.updateReconnectText();
+        }
         // 结算面板到期自动收起（出锅常驻除外）
         if (this.settleNode && Date.now() >= this.settleVisibleUntil
             && this.snap?.phase !== 'ROUND_OVER') {
