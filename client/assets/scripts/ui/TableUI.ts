@@ -27,7 +27,10 @@ const { ccclass, property } = _decorator;
 @ccclass('TableUI')
 export class TableUI extends Component {
 
-    @property serverUrl = 'ws://localhost:8080/ws';
+    // 默认值仅作兜底，运行时以 main.scene 里挂载的 serverUrl 为准。
+    // 【真机调试必读】手机上的 localhost 是手机自己，必须填电脑的局域网 IP，
+    // 且手机与电脑连同一 WiFi。换 WiFi 后 IP 会变，两处都要改。
+    @property serverUrl = 'ws://10.192.0.121:8080/ws';
     @property roomId = 1001;
     @property playerId = 1;
     @property mySeat: SeatName = 'NORTH';

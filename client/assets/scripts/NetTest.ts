@@ -19,8 +19,11 @@ const { ccclass, property } = _decorator;
 @ccclass('NetTest')
 export class NetTest extends Component {
 
+    // 【真机调试必读】手机上的 localhost 是手机自己，连不到电脑。
+    // 必须填电脑的局域网 IP，且手机与电脑连同一 WiFi。
+    // 换 WiFi 后 IP 会变 —— main.scene / TableUI.ts / NetTest.ts 三处都要改。
     @property
-    serverUrl = 'ws://localhost:8080/ws';
+    serverUrl = 'ws://10.192.0.121:8080/ws';
 
     @property
     roomId = 1001;
