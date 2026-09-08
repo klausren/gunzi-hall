@@ -33,7 +33,7 @@
 
 - **规则手册** v1.1 定稿冻结（12 项决议全部拍板）
 - **后端**（`server/`，Maven 多模块，JDK 17）：
-  - `game-domain` 领域模型：牌 / 牌值比较 / 发牌 / 命令模式 / 计分 / 进贡血数（36 个单元测试全绿）
+  - `game-domain` 领域模型：牌 / 牌值比较 / 发牌 / 命令模式 / 计分 / 进贡血数（**126 个**单元测试全绿）
   - `game-room` Netty 战斗服：3 个 bot + 真人 NORTH 演示入口（`ws://localhost:8080/ws`）
 - **客户端**（`client/`，Cocos Creator 3.8.8）：
   - 牌桌 UI 全套（TableUI / CardUI / 手牌排序 / 墩牌可视化 / 动画 / 局结算面板）
@@ -49,8 +49,9 @@
 
 ### 代码仓库状态 ⚠️
 
-- 远程 `origin/main` 已推送到 `60e8e8c`
-- **但本地有 6 个改动尚未 commit + push**（详见 §9），**团队 clone 之前请先由任老师 push**，否则会拿到旧版（带大写 uuid 的场景文件、旧构建脚本）
+- 远程 `origin/main` 已推送到 `e0722bd`（含 `.gitattributes` 强制 LF、`main.scene.meta` uuid 小写、`build-wechatgame.sh` 一键构建 + 主包瘦身至 1.73MB）。
+- **团队现在 clone 即可拿到修复版**，无需等任老师补 push。
+- 任老师本地仅剩**文档自身的测试数修正**未提交（无代码阻塞）。
 
 ---
 
@@ -105,7 +106,7 @@ cd gunzi-hall
 
 ```powershell
 cd server
-mvn test        # 36 个单元测试，全绿即环境 OK
+mvn test        # 142 个单元测试（game-domain 126 + game-room 16，2 个 Redis 相关本机无 Redis 时跳过），全绿即环境 OK
 ```
 
 启动战斗服（3 bot + 真人 NORTH 演示）：
@@ -214,20 +215,85 @@ mvn -pl game-room exec:java -Dexec.mainClass=com.gunzihall.room.ServerMain -Dexe
 
 ---
 
-## 9. 重要提醒：当前有改动未推送 🔴
+## 9. 仓库修复状态（2026-09-08 核对）
 
-**以下改动还在任老师本地，尚未 commit + push。团队 clone 之前必须先 push，否则会拿到带大写 uuid 的旧版：**
+《给任老师的反馈-2026-09-07》§1 担心的三项**已全部推上 `origin/main`（提交 `e0722bd`）**，团队 clone 拿到的是修复版：
 
-| 文件 | 改动 |
+| §1 检查项 | 状态 |
 |---|---|
-| `client/assets/scenes/main.scene` | 场景 `_id` uuid 改小写 |
-| `client/assets/scenes/main.scene.meta` | uuid 改小写 |
-| `client/build-wechatgame.sh` | 补丁升级（6 字段 game.json + libVersion=3.7.9 + 文件名小写归一化） |
-| `client/package.json` | （上轮遗留） |
-| `client/settings/v2/packages/project.json` | （上轮遗留） |
-| `.gitattributes` | 本次新增（换行符规范） |
+| `.gitattributes`（§8.3 强制 LF） | ✅ 已在 `e0722bd` |
+| `client/build-wechatgame.sh`（§7 构建脚本） | ✅ 已在 `e0722bd` |
+| `main.scene.meta` uuid 小写 | ✅ 已在 `e0722bd`（大写 uuid 黑屏雷已消除） |
 
-> 任老师 push 完成后，团队再 clone，就能拿到完整修复版。
+> 任老师本地当前**无代码层阻塞**；仅本指南的测试数（36→142）等措辞修正尚未提交，不影响 clone。
+
+### 9.1 协作方式已定：GitHub 协作者 + PR（详见 §11）
+
+不再走 OneDrive 共享文件夹。队友以 **Write 协作者** 身份推分支、开 PR，任老师 review 合并。
+
+---
+
+## 11. 协作流程：GitHub 协作者 + Pull Request（2026-09-08 起生效）
+
+> 项目走 **GitHub 协作者（Write）路线**：队友直接在 `klausren/gunzi-hall` 推分支、开 PR，任老师 review 后合并。
+> **不走 OneDrive 共享**（含 macOS 专属 `.workbuddy/`、绝对路径、600MB+ 体积、无版本控制）。
+
+### 11.1 任老师：添加协作者（一次性）
+
+1. 打开 `https://github.com/klausren/gunzi-hall` → **Settings → Collaborators**（左侧栏）
+2. **Add people** → 输入队友的 GitHub 用户名 / 邮箱 → 权限选 **Write**
+3. 队友收到邮件 / 站内通知，接受后即刻生效
+
+> 或本机有 `gh` 时一行命令：`gh repo invite <队友用户名> --permission write`（需 `gh auth login`）。
+> ⚠️ 仓库已是 **public**，协作者推代码无需额外资质；但**严禁在仓库提交任何密钥 / 版号材料**（个人主体走体验版，无商业机密）。
+
+### 11.2 队友：日常开发流程（禁止直接推 main）
+
+```powershell
+git clone https://github.com/klausren/gunzi-hall.git
+cd gunzi-hall
+git checkout -b fix/flaky-tests-2026-09-07   # 分支命名见 11.3
+# ... 改代码 ...
+git add -A
+git commit -m "fix(room): 修复两个 flaky 测试竞态（见反馈§三）"   # 提交规范见 11.4
+git push -u origin fix/flaky-tests-2026-09-07
+# 去 GitHub 网页点 Compare & pull request，按模板填（见 11.5）
+```
+
+> 任老师 review 通过后合并；合并后队友 `git checkout main && git pull` 同步。**main 受保护，所有人走 PR**。
+
+### 11.3 分支命名
+
+| 类型 | 前缀 | 例 |
+|---|---|---|
+| 新功能 | `feat/` | `feat/matchmaking` |
+| Bug / 测试修复 | `fix/` | `fix/flaky-tests-2026-09-07` |
+| 文档 | `docs/` | `docs/windows-guide` |
+| 构建 / 工程 | `build/` | `build/wechatgame-ps1` |
+
+### 11.4 提交信息规范（Conventional Commits，带 scope）
+
+格式：`类型(范围): 简述（中文祈使句，不加句号）`
+
+- 对齐仓库已有风格：`fix(wechatgame):`、`build(wechatgame):`、`feat(ui):`、`feat(room):`、`chore(client):`
+- 类型：`feat` / `fix` / `docs` / `build` / `refactor` / `test` / `chore`
+- 范围：改哪个模块写哪个（`room` / `ui` / `wechatgame` / `client` / `domain`）
+- 例：`fix(room): 修复重连快照与后台驱动竞态`、`build(wechatgame): 新增 Windows 构建脚本`
+
+### 11.5 PR 模板与 review 要点
+
+- 仓库已放 `.github/PULL_REQUEST_TEMPLATE.md`，开 PR 时自动载入。
+- **必填**：改动文件清单 + 验证方式（尤其 `mvn test` 是否全绿、flaky 是否连跑 5 次通过）。
+- 任老师 review 重点：**是否遵守 §8 三铁律**、**是否用构建脚本而非 Cocos GUI 直发**、**有无密钥 / 大二进制入库**。
+
+### 11.6 首个 PR 示例（队友待推）
+
+- 分支：`fix/flaky-tests-2026-09-07`
+- 内容：
+  1. `server/game-room/.../RoomManager.java` —— 重连快照时机后移（修复 `RestoreTest` 竞态）
+  2. `server/game-room/.../TimeoutTrustTest.java` —— 单调断言 + AUTO 事件断言（修复 `humanPlaysBeforeTimeout`）
+  3. 新增 `client/build-wechatgame.ps1` —— Windows 构建等价物（§7 待办）
+- 详见《给任老师的反馈-2026-09-07.md》§三 / §四。
 
 ---
 
