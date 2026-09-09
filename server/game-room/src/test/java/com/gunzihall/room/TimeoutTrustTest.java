@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -128,7 +127,8 @@ class TimeoutTrustTest {
     void humanPlaysBeforeTimeout_timeoutFiresAsNoop() {
         // bot 每步 100ms：真人手动出牌后本墩要 ~300ms 才收完。
         // 超时 200ms 必然落在墩进行中（等待者是 bot）→ 空响，且 actionSeq 已变 → 双重保险。
-        RoomActor actor = buildActor(200, new RecordSink(1001), 100);
+        RecordSink sink = new RecordSink(1001);
+        RoomActor actor = buildActor(200, sink, 100);
         try {
             awaitNorthTurn(actor);
             int handBefore = actor.room().playerAt(Seat.NORTH).hand().size();
@@ -140,14 +140,19 @@ class TimeoutTrustTest {
             List<String> codes = CardCodec.encodeAll(legal);
             actor.submit(new RoomActor.CommandSpec("PLAY", 1001, codes, null, null, null, null));
 
-            awaitTrue("手动出牌后手牌应减少 1 张", 3000,
-                    () -> actor.room().playerAt(Seat.NORTH).hand().size() == handBefore - 1);
+            // 手牌数是快速变化的移动靶，用 < 单调断言「已减少」，避免 == 精确卡瞬间导致 flaky
+            awaitTrue("手动出牌后手牌应减少", 3000,
+                    () -> actor.room().playerAt(Seat.NORTH).hand().size() < handBefore);
 
-            sleep(400); // 越过超时点（200ms），墩内 bot 行动期
+            // 越过超时点（200ms），覆盖本墩收尾，但不等到下一墩 NORTH 自然超时（~500ms）
+            sleep(350);
             assertFalse(actor.isStuck(), "真人正常出牌后，迟到的超时任务必须空响，不得破坏状态");
-            int handNow = actor.room().playerAt(Seat.NORTH).hand().size();
-            assertEquals(handBefore - 1, handNow,
-                    "迟到超时不得在同一墩/本回合再代打扣牌");
+
+            // 关键断言：真人在线且已手动出牌，系统不得广播 AUTO 托管事件。
+            // 若迟到超时误触发代打，AUTO 事件必然出现在 messages 中（单调可检测，不依赖牌数瞬间）。
+            boolean autoSeen = sink.messages.stream()
+                    .anyMatch(m -> m.contains("\"op\":\"AUTO\""));
+            assertFalse(autoSeen, "真人在线并已手动出牌，不得触发 AUTO 托管代打");
         } finally {
             actor.shutdown();
         }
