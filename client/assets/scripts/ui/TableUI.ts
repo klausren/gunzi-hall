@@ -157,6 +157,7 @@ export class TableUI extends Component {
         // 【必修】不再清空 selected：selected 存的是牌代码（不是下标），快照变化不影响。
         // 出牌成功后该牌代码不在新 yourHand 里，自然失效，无需手动清。
         this.snap = s;
+        this.pruneSelected();
         this.renderAll();
         // 重连恢复引导：快照对齐后，若正轮到我行动则明确提示
         if (this.hintMyTurnOnSnapshot) {
@@ -779,8 +780,10 @@ export class TableUI extends Component {
             prevGroup = g;
             const cardCode = hand[idx];
             const card = createCardNode(cardCode);
-            // 按牌代码判断选中状态（不是按下标）：重画整手时仍能保留选中视觉
-            const selected = this.selected.indexOf(cardCode) >= 0;
+            // 用复合身份 "code#occurrence" 判断选中（不是按下标、也不是纯代码）：
+            // 重画整手时保留选中视觉，且能区分三副牌里的重复代码
+            const key = this.cardKey(hand, idx);
+            const selected = this.selected.indexOf(key) >= 0;
             card.setPosition(x, selected ? 18 : 0, 0);
             if (selected) drawCardBg(card, true);
             // 牌面 56 宽但牌多时间距只有 ~40 → 互相重叠。命中区必须缩到 spacing 宽，
@@ -799,8 +802,8 @@ export class TableUI extends Component {
                 // 【真机必修】按下即选中：真机手指轻微滑动会把 TOUCH_END 变成 TOUCH_CANCEL，
                 // 选中逻辑挂在 TOUCH_END 上会表现为"点了没反应"。
                 // 模拟器用鼠标点击无抖动，所以这个问题在模拟器上根本测不出来。
-                // 传牌代码（不是下标）：这样 selected 才不会因快照重排而失效。
-                this.toggleSelect(cardCode, card);
+                // 传复合身份（不是下标、也不是纯代码）：快照重排不影响，重复代码也能区分。
+                this.toggleSelect(key, card);
             });
             card.on(Node.EventType.TOUCH_END, () => {
                 tween(card).to(0.12, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
@@ -815,18 +818,22 @@ export class TableUI extends Component {
     }
 
     /** 选中/取消选中一张牌：只动这一张节点（弹起 + 金框），不重建整手。
-     *  参数 cardCode 是牌代码（如 "D4"），不是下标 ——
-     *  这样快照变化/手牌重排都不会让选中状态失效。
+     *  参数 key 是复合身份 "code#occurrence"（不是下标、也不是纯代码）：
+     *   - 不是下标：服务端每次快照都重排手牌（定主前后规则还不同），下标会整体错位
+     *   - 不是纯代码：三副牌同点同花有 3 张（都是 "H9"），纯代码无法区分，
+     *     点第 2 张会被判定成取消第 1 张 → "一次只能选一张"
      *  用 string[] 不用 Set：避免 Cocos 把 `[...set]` 编译成 `[].concat(set)`，
      *  后者对 Set 不展开 → selectedCodes() 返回 [Set] → JSON 序列化出 `cards:[{}]`。 */
-    private toggleSelect(cardCode: string, card: Node): void {
-        const i = this.selected.indexOf(cardCode);
+    private toggleSelect(key: string, card: Node): void {
+        const i = this.selected.indexOf(key);
         const on = i >= 0;
         if (on) this.selected.splice(i, 1);
-        else this.selected.push(cardCode);
+        else this.selected.push(key);
         drawCardBg(card, !on);
         tween(card).to(0.12, { position: new Vec3(card.position.x, !on ? 18 : 0, 0) },
             { easing: 'backOut' }).start();
+        // 选中变化会影响按钮文案（"出牌：先选牌" → "出牌"）
+        this.renderButtons();
     }
 
     // ==================== 手牌排序（主牌一堆 + 副牌按花色分堆） ====================
@@ -906,10 +913,57 @@ export class TableUI extends Component {
         return idx;
     }
 
+    /**
+     * 【真机必修】手牌里每张牌的**稳定身份** = `牌代码#第几次出现`（如 "H9#0" / "H9#1"）。
+     *
+     * 为什么不能用纯牌代码：三副牌里同点同花的牌有 3 张（都是 "H9"），
+     * 若只用代码做身份，选中第 2 张时 indexOf 会命中第 1 张 → 判定成"取消选中"
+     * → 表现为"一次只能选一张，点第二张就把第一张取消了"。
+     *
+     * 为什么不能用纯下标：服务端每次快照都重新排序手牌（定主前后排序规则还不同：
+     * 定主前按 rank、定主后按 CardComparator(trump)），下标会整体错位。
+     *
+     * 复合身份两者兼得：手牌集合不变时身份稳定；重复代码靠 occurrence 区分。
+     * 发给服务端时用 selectedCodes() 剥掉 "#n" 后缀，恢复成纯牌代码 multiset。
+     */
+    /**
+     * 保险：剔除 selected 里已不在手牌中的复合身份。
+     * 出牌成功后那些牌从 yourHand 消失，对应的 "code#occurrence" 自然失效；
+     * 若不清掉，下次 selectedCodes() 会把已打出去的牌再发一遍。
+     */
+    private pruneSelected(): void {
+        if (this.selected.length === 0) return;
+        const hand = this.snap?.yourHand ?? [];
+        // 统计每个牌代码在手牌里的可用张数
+        const avail = new Map<string, number>();
+        for (const c of hand) avail.set(c, (avail.get(c) ?? 0) + 1);
+        const kept: string[] = [];
+        for (const k of this.selected) {
+            const p = k.indexOf('#');
+            if (p < 0) continue;                       // 非法身份，丢弃
+            const code = k.slice(0, p);
+            const occ = parseInt(k.slice(p + 1), 10);
+            if (Number.isFinite(occ) && (avail.get(code) ?? 0) > occ) kept.push(k);
+        }
+        this.selected = kept;
+    }
+
+    private cardKey(hand: string[], idx: number): string {
+        const code = hand[idx];
+        let occ = 0;
+        for (let i = 0; i < idx; i++) {
+            if (hand[i] === code) occ++;
+        }
+        return `${code}#${occ}`;
+    }
+
     private selectedCodes(): string[] {
-        // selected 是 string[]，直接返回新拷贝（不直接返内部引用，防止 sendCmd 后
-        // 有人意外 mutate 干扰下次出牌）。后端 Cards 按值 equals，可正确处理重复牌。
-        return this.selected.slice();
+        // selected 存的是 "code#occurrence" 复合身份，发给服务端前剥掉 "#n" 后缀。
+        // 结果形如 ["H9","H9"]（两张 H9）—— 后端 Cards 按值 equals，multiset 正确处理。
+        return this.selected.map(k => {
+            const p = k.indexOf('#');
+            return p >= 0 ? k.slice(0, p) : k;
+        });
     }
 
     // ==================== 阶段操作按钮 ====================
