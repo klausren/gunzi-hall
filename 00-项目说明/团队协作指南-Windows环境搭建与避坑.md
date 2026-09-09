@@ -142,7 +142,7 @@ mvn -pl game-room exec:java -Dexec.mainClass=com.gunzihall.room.ServerMain -Dexe
 走 **Cocos Creator GUI 发布**（构建面板 → 平台选"微信小游戏"）——但**必须手动补丁**，否则必踩坑（这几项就是 §8.1 的血泪教训）：
 
 1. **`build/wechatgame/game.json` 改写成 6 字段**（见 §8.1 模板）
-2. **`project.config.json` 的 `libVersion` 改成 `"3.7.9"`**、`appid` 填 `wxf88033b2ee303d71`
+2. **`project.config.json` 的 `libVersion` 改成 `"3.7.9"`**、`appid` 填 `wx72e9a9e9764f0ee1`
 3. **检查 `assets/main/import/` 下文件名是否全小写**（大写会导致微信端黑屏，见 §8.2）
 
 > 更省心的做法：需要频繁在 Windows 构建时，可以由任老师补一个 PowerShell 版构建脚本（列入待办）。
@@ -205,7 +205,7 @@ mvn -pl game-room exec:java -Dexec.mainClass=com.gunzihall.room.ServerMain -Dexe
 
 - **项目类型在第一次导入时锁定**：一旦被识别成"小程序"，后续改 `compileType: "game"` 也救不回，会一直找 `app.json` 而报"找不到 app.json"。
 - 新版开发者工具**已无独立"小游戏"选项**（只有"小程序/插件/多端应用"），靠 `compileType: "game"` 自动分流。
-- **正确姿势**：用「**+ 新建项目**」（不是"导入项目"），目录选 `build/wechatgame`，项目类型**留空**让它自己推断，AppID 选 `wxf88033b2ee303d71`。
+- **正确姿势**：用「**+ 新建项目**」（不是"导入项目"），目录选 `build/wechatgame`，项目类型**留空**让它自己推断，AppID 选 `wx72e9a9e9764f0ee1`。
 - 若误识别成小程序：关闭项目 → 删 `project.private.config.json` → 「+ 新建」重来。
 - **版本兼容**：社区验证 Cocos 3.8.x 的稳定搭配是 **`1.06.2412050`**；最新版（2.02+）可能报 `SummerCompiler.getAllPagesAndPageComponent` 崩溃。出问题时优先降级到 1.06.2412050。
 
