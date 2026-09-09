@@ -147,6 +147,12 @@ export class TableUI extends Component {
     }
 
     private onSnapshotMsg(s: SnapshotMsgDown): void {
+        // 手牌快照变了（轮换 / 出牌 / 抠底 等）→ selected 里存的是旧下标，
+        // 会指向新手牌里的别处或越界。直接清空，避免用户视觉上看到"还选着"
+        // 但实际上出牌会带 null（→ 服务端"牌编码为空"）。
+        if (this.snap && this.snap.yourHand.join(',') !== (s.yourHand ?? []).join(',')) {
+            this.selected.clear();
+        }
         this.snap = s;
         this.renderAll();
         // 重连恢复引导：快照对齐后，若正轮到我行动则明确提示
@@ -891,7 +897,12 @@ export class TableUI extends Component {
 
     private selectedCodes(): string[] {
         const hand = this.snap?.yourHand ?? [];
-        return [...this.selected].sort((a, b) => a - b).map(i => hand[i]);
+        // 【必修】selected 存的是手牌下标，而每次快照都会重排/减少手牌（39→11…），
+        // 旧下标会越界或指向别的牌 → hand[i] 为 undefined → 序列化成 null 发给服务端，
+        // 服务端 CardCodec.decode 抛"牌编码为空"，出牌必然失败。这里必须过滤无效项。
+        return [...this.selected].sort((a, b) => a - b)
+            .map(i => hand[i])
+            .filter((c): c is string => typeof c === 'string' && c.length > 0);
     }
 
     // ==================== 阶段操作按钮 ====================
