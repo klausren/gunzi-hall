@@ -93,9 +93,11 @@ public final class RoomManager {
         }
         synchronized (actor) {
             if (actor.hasPlayer(playerId)) {
-                // 断线重连：重新绑定通道
+                // 断线重连：重新绑定通道，先发送确定性快照，再恢复 bot 驱动。
+                // 顺序不能反：若先恢复驱动，异步线程可能已推进牌局，重连者拿到的是过期快照。
                 actor.addSink(sink);
                 sink.send(snapshotMessage(actor, playerId));
+                actor.resumeAfterRestore();
                 return JsonUtil.write(Map.of("type", "joined", "reconnect", true,
                         "roomId", roomId, "playerId", playerId));
             }
@@ -172,11 +174,8 @@ public final class RoomManager {
                 actor.replaySpec(toSpec(op, playerId, m));
             }
         }
-        // 日志中已有发牌 → 牌局进行过，恢复 bot 驱动（不重新发牌）
-        boolean dealt = log.stream().anyMatch(e -> e.contains("\"op\":\"DEAL\""));
-        if (dealt) {
-            actor.resumeAfterRestore();
-        }
+        // 注意：此处不调用 resumeAfterRestore()。恢复出的房间由 join() 在
+        // 重连快照发送之后恢复 bot 驱动，保证重连者拿到的是重放结束的确定性快照。
         return actor;
     }
 
