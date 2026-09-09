@@ -37,11 +37,14 @@ export class TableUI extends Component {
 
     private net: NetClient | null = null;
     private snap: SnapshotMsgDown | null = null;
-    // 【真机必修】存的是手牌的**牌代码字符串**（如 "D4"），不是下标。
-    // 原因：每次服务端响应命令都会推一次 snapshot，手牌会重排且张数递减；
-    // 若存下标，旧下标会指向别处或越界 → hand[i] 为 undefined → 服务端抛"牌编码为空"。
-    // 存牌代码后：快照变化不影响选择；出牌成功后该代码自然不在新快照的 yourHand 里，自动失效。
-    private selected = new Set<string>();
+    // 【真机必修】用普通 string[] 存选中牌代码，**不要用 Set<string>**。
+    // 原因：Cocos 把 `[...this.selected]` 编译成 `[].concat(this.selected)`，
+    // 而 Array.prototype.concat 对 Set 不会展开（Set 没 Symbol.isConcatSpreadable），
+    // 结果 `selectedCodes()` 实际返回 `[Set]`（数组里塞一个 Set 对象）；
+    // JSON.stringify 后 `cards:[{}]`（空对象）→ 服务端 Jackson 期望 List<String>，
+    // 报 "Cannot deserialize value of type `java.lang.String` from Object value"。
+    // 重复牌（两张同点同花的 S5）天然支持：array 允许重复元素。
+    private selected: string[] = [];
     private handNodes = new Map<number, Node>();
 
     private topLabel!: Label;
@@ -777,7 +780,7 @@ export class TableUI extends Component {
             const cardCode = hand[idx];
             const card = createCardNode(cardCode);
             // 按牌代码判断选中状态（不是按下标）：重画整手时仍能保留选中视觉
-            const selected = this.selected.has(cardCode);
+            const selected = this.selected.indexOf(cardCode) >= 0;
             card.setPosition(x, selected ? 18 : 0, 0);
             if (selected) drawCardBg(card, true);
             // 牌面 56 宽但牌多时间距只有 ~40 → 互相重叠。命中区必须缩到 spacing 宽，
@@ -813,11 +816,14 @@ export class TableUI extends Component {
 
     /** 选中/取消选中一张牌：只动这一张节点（弹起 + 金框），不重建整手。
      *  参数 cardCode 是牌代码（如 "D4"），不是下标 ——
-     *  这样快照变化/手牌重排都不会让选中状态失效。 */
+     *  这样快照变化/手牌重排都不会让选中状态失效。
+     *  用 string[] 不用 Set：避免 Cocos 把 `[...set]` 编译成 `[].concat(set)`，
+     *  后者对 Set 不展开 → selectedCodes() 返回 [Set] → JSON 序列化出 `cards:[{}]`。 */
     private toggleSelect(cardCode: string, card: Node): void {
-        const on = this.selected.has(cardCode);
-        if (on) this.selected.delete(cardCode);
-        else this.selected.add(cardCode);
+        const i = this.selected.indexOf(cardCode);
+        const on = i >= 0;
+        if (on) this.selected.splice(i, 1);
+        else this.selected.push(cardCode);
         drawCardBg(card, !on);
         tween(card).to(0.12, { position: new Vec3(card.position.x, !on ? 18 : 0, 0) },
             { easing: 'backOut' }).start();
@@ -901,9 +907,9 @@ export class TableUI extends Component {
     }
 
     private selectedCodes(): string[] {
-        // 【已重构】selected 存的就是牌代码字符串（multiset：允许重复）。
-        // 后端 Cards 容器按值 equals，可正确处理重复牌（如两张 D4）。
-        return [...this.selected];
+        // selected 是 string[]，直接返回新拷贝（不直接返内部引用，防止 sendCmd 后
+        // 有人意外 mutate 干扰下次出牌）。后端 Cards 按值 equals，可正确处理重复牌。
+        return this.selected.slice();
     }
 
     // ==================== 阶段操作按钮 ====================
@@ -917,7 +923,7 @@ export class TableUI extends Component {
         const myTurn = s.turn === this.mySeat;
         switch (s.phase) {
             case 'BIDDING': {
-                if (this.selected.size > 0) {
+                if (this.selected.length > 0) {
                     SUIT_OPTIONS.forEach((o, i) => {
                         const x = -240 + i * 160;
                         this.makeButton(`亮${o.label}`, x, () => {
@@ -932,12 +938,12 @@ export class TableUI extends Component {
             }
             case 'BURYING': {
                 if (s.banker === this.mySeat) {
-                    const need = 6 - this.selected.size;
-                    const txt = this.selected.size > 0
+                    const need = 6 - this.selected.length;
+                    const txt = this.selected.length > 0
                         ? `扣底(还差${Math.max(need, 0)}张)`
                         : '扣底：选6张';
                     this.makeButton(txt, 0, () => {
-                        if (this.selected.size !== 6) { this.showToast('扣底需恰好 6 张', true); return; }
+                        if (this.selected.length !== 6) { this.showToast('扣底需恰好 6 张', true); return; }
                         this.net?.sendCmd('BURY', { cards: this.selectedCodes() });
                     });
                 }
@@ -945,10 +951,10 @@ export class TableUI extends Component {
             }
             case 'PLAYING': {
                 if (myTurn) {
-                    this.makeButton(this.selected.size > 0 ? '出牌' : '出牌：先选牌', 0, () => {
-                        if (this.selected.size === 0) { this.showToast('先点选要出的牌', true); return; }
+                    this.makeButton(this.selected.length > 0 ? '出牌' : '出牌：先选牌', 0, () => {
+                        if (this.selected.length === 0) { this.showToast('先点选要出的牌', true); return; }
                         this.net?.sendCmd('PLAY', { cards: this.selectedCodes() });
-                        this.selected.clear();
+                        this.selected.length = 0;
                     });
                 }
                 break;
@@ -957,9 +963,9 @@ export class TableUI extends Component {
                 const mine = s.pendingTributes?.[this.mySeat];
                 if (mine) {
                     this.makeButton('进贡', 0, () => {
-                        if (this.selected.size === 0) { this.showToast('先选要贡的牌', true); return; }
+                        if (this.selected.length === 0) { this.showToast('先选要贡的牌', true); return; }
                         this.net?.sendCmd('TRIBUTE', { cards: this.selectedCodes(), payee: mine.receiver });
-                        this.selected.clear();
+                        this.selected.length = 0;
                     });
                 }
                 break;
@@ -969,9 +975,9 @@ export class TableUI extends Component {
                     .find(([, v]) => v.receiver === this.mySeat)?.[0];
                 if (payer) {
                     this.makeButton('还贡', 0, () => {
-                        if (this.selected.size === 0) { this.showToast('先选要还的牌', true); return; }
+                        if (this.selected.length === 0) { this.showToast('先选要还的牌', true); return; }
                         this.net?.sendCmd('RETURN_TRIBUTE', { cards: this.selectedCodes(), payee: payer });
-                        this.selected.clear();
+                        this.selected.length = 0;
                     });
                 }
                 break;
