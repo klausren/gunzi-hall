@@ -37,7 +37,11 @@ export class TableUI extends Component {
 
     private net: NetClient | null = null;
     private snap: SnapshotMsgDown | null = null;
-    private selected = new Set<number>();   // 手牌下标
+    // 【真机必修】存的是手牌的**牌代码字符串**（如 "D4"），不是下标。
+    // 原因：每次服务端响应命令都会推一次 snapshot，手牌会重排且张数递减；
+    // 若存下标，旧下标会指向别处或越界 → hand[i] 为 undefined → 服务端抛"牌编码为空"。
+    // 存牌代码后：快照变化不影响选择；出牌成功后该代码自然不在新快照的 yourHand 里，自动失效。
+    private selected = new Set<string>();
     private handNodes = new Map<number, Node>();
 
     private topLabel!: Label;
@@ -147,12 +151,8 @@ export class TableUI extends Component {
     }
 
     private onSnapshotMsg(s: SnapshotMsgDown): void {
-        // 手牌快照变了（轮换 / 出牌 / 抠底 等）→ selected 里存的是旧下标，
-        // 会指向新手牌里的别处或越界。直接清空，避免用户视觉上看到"还选着"
-        // 但实际上出牌会带 null（→ 服务端"牌编码为空"）。
-        if (this.snap && this.snap.yourHand.join(',') !== (s.yourHand ?? []).join(',')) {
-            this.selected.clear();
-        }
+        // 【必修】不再清空 selected：selected 存的是牌代码（不是下标），快照变化不影响。
+        // 出牌成功后该牌代码不在新 yourHand 里，自然失效，无需手动清。
         this.snap = s;
         this.renderAll();
         // 重连恢复引导：快照对齐后，若正轮到我行动则明确提示
@@ -774,8 +774,10 @@ export class TableUI extends Component {
             const g = this.groupOf(hand[idx]);
             if (i > 0 && g !== prevGroup) x += gap;   // 换组加间隙
             prevGroup = g;
-            const card = createCardNode(hand[idx]);
-            const selected = this.selected.has(idx);
+            const cardCode = hand[idx];
+            const card = createCardNode(cardCode);
+            // 按牌代码判断选中状态（不是按下标）：重画整手时仍能保留选中视觉
+            const selected = this.selected.has(cardCode);
             card.setPosition(x, selected ? 18 : 0, 0);
             if (selected) drawCardBg(card, true);
             // 牌面 56 宽但牌多时间距只有 ~40 → 互相重叠。命中区必须缩到 spacing 宽，
@@ -794,7 +796,8 @@ export class TableUI extends Component {
                 // 【真机必修】按下即选中：真机手指轻微滑动会把 TOUCH_END 变成 TOUCH_CANCEL，
                 // 选中逻辑挂在 TOUCH_END 上会表现为"点了没反应"。
                 // 模拟器用鼠标点击无抖动，所以这个问题在模拟器上根本测不出来。
-                this.toggleSelect(idx, card);
+                // 传牌代码（不是下标）：这样 selected 才不会因快照重排而失效。
+                this.toggleSelect(cardCode, card);
             });
             card.on(Node.EventType.TOUCH_END, () => {
                 tween(card).to(0.12, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
@@ -808,11 +811,13 @@ export class TableUI extends Component {
         }
     }
 
-    /** 选中/取消选中一张牌：只动这一张节点（弹起 + 金框），不重建整手 */
-    private toggleSelect(idx: number, card: Node): void {
-        const on = this.selected.has(idx);
-        if (on) this.selected.delete(idx);
-        else this.selected.add(idx);
+    /** 选中/取消选中一张牌：只动这一张节点（弹起 + 金框），不重建整手。
+     *  参数 cardCode 是牌代码（如 "D4"），不是下标 ——
+     *  这样快照变化/手牌重排都不会让选中状态失效。 */
+    private toggleSelect(cardCode: string, card: Node): void {
+        const on = this.selected.has(cardCode);
+        if (on) this.selected.delete(cardCode);
+        else this.selected.add(cardCode);
         drawCardBg(card, !on);
         tween(card).to(0.12, { position: new Vec3(card.position.x, !on ? 18 : 0, 0) },
             { easing: 'backOut' }).start();
@@ -896,13 +901,9 @@ export class TableUI extends Component {
     }
 
     private selectedCodes(): string[] {
-        const hand = this.snap?.yourHand ?? [];
-        // 【必修】selected 存的是手牌下标，而每次快照都会重排/减少手牌（39→11…），
-        // 旧下标会越界或指向别的牌 → hand[i] 为 undefined → 序列化成 null 发给服务端，
-        // 服务端 CardCodec.decode 抛"牌编码为空"，出牌必然失败。这里必须过滤无效项。
-        return [...this.selected].sort((a, b) => a - b)
-            .map(i => hand[i])
-            .filter((c): c is string => typeof c === 'string' && c.length > 0);
+        // 【已重构】selected 存的就是牌代码字符串（multiset：允许重复）。
+        // 后端 Cards 容器按值 equals，可正确处理重复牌（如两张 D4）。
+        return [...this.selected];
     }
 
     // ==================== 阶段操作按钮 ====================
