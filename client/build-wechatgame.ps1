@@ -14,7 +14,7 @@ param(
     [string]$CocosExe = "",                    # CocosCreator.exe 路径（留空自动探测）
     [string]$Project = "",                     # 项目目录（默认：本脚本所在目录）
     [string]$BuildPath = "",                   # 输出目录（默认：<project>\build\wechatgame）
-    [string]$AppId = "wxf88033b2ee303d71",     # 小游戏 appid
+    [string]$AppId = "wx72e9a9e9764f0ee1",     # 小游戏 appid
     [string]$LibVersion = "3.7.9",             # 基础库版本（latest 会触发小游戏识别 bug，勿改）
     [switch]$PatchOnly                          # 跳过构建，只补丁
 )

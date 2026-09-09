@@ -1,12 +1,12 @@
 #!/bin/bash
 # 一键构建微信小游戏（横屏 + 开发者域名校验关闭）
 # 用法：./build-wechatgame.sh [appid]
-#   appid 不传则用 wxf88033b2ee303d71（已注册的小游戏 appid）
+#   appid 不传则用 wx72e9a9e9764f0ee1（已注册的小游戏 appid）
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COCOS="/Applications/Cocos/Creator/3.8.8/CocosCreator.app/Contents/MacOS/CocosCreator"
-APPID="${1:-wxf88033b2ee303d71}"
+APPID="${1:-wx72e9a9e9764f0ee1}"
 OUT="$PROJECT_DIR/build/wechatgame"
 
 echo "==> 自动同步 serverUrl（本机局域网 IP，手机真机调试需要）"
