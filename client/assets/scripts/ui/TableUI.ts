@@ -1,4 +1,4 @@
-import { _decorator, Color, Component, Graphics, Label, Node, Tween, tween, UIOpacity, UITransform, Vec3, view } from 'cc';
+import { _decorator, Color, Component, Graphics, Label, Node, ResolutionPolicy, Tween, tween, UIOpacity, UITransform, Vec3, view } from 'cc';
 import { NetClient } from '../net/NetClient';
 import type { EventMsg, JoinedMsg, SeatName, SnapshotMsgDown } from '../net/Protocol';
 import { cardFace, createCardNode, createMiniCardNode, drawCardBg, SUIT_OPTIONS } from './CardUI';
@@ -45,6 +45,9 @@ export class TableUI extends Component {
     // 报 "Cannot deserialize value of type `java.lang.String` from Object value"。
     // 重复牌（两张同点同花的 S5）天然支持：array 允许重复元素。
     private selected: string[] = [];
+    private vw = 1280;                              // 本机实际可见宽度（FIXED_HEIGHT 下按屏幕比例算出来）
+    private tw = 1120;                              // 牌桌绒布宽度（随屏幕放宽，避免宽屏两侧露底色）
+    private handBaseY = new Map<string, number>();  // 复合身份 → 该牌所在行的基础 y（两行后不能写死 0）
     private handNodes = new Map<number, Node>();
 
     private topLabel!: Label;
@@ -127,6 +130,14 @@ export class TableUI extends Component {
     }
 
     start(): void {
+        // 【宽屏适配 T-701】默认 fitWidth（宽钉死 1280、高按比例）：在 2.17:1 的现代手机上
+        // 可见高度只剩 589 而不是 720，顶栏 y=320/288 会被整行裁掉 —— 级数、主牌、庄家
+        // 全看不见。改 FIXED_HEIGHT：垂直 720 完整可见，宽度按屏幕比例向外扩展，
+        // 宽屏反而更宽（手牌区更松），是一举两得的解法。
+        view.setDesignResolutionSize(1280, 720, ResolutionPolicy.FIXED_HEIGHT);
+        const fs = view.getFrameSize();
+        this.vw = fs.height > 0 ? 720 * fs.width / fs.height : 1280;
+        this.tw = Math.min(1500, this.vw - 80);
         this.buildLayout();
         this.net = new NetClient(this.serverUrl);
         this.net.onJoined(j => this.onJoinedMsg(j));
@@ -228,19 +239,19 @@ export class TableUI extends Component {
         // 牌桌绒布背景（最先添加 = 最底层；纯 Graphics 程序化，无美术资源）
         const felt = new Node('felt');
         felt.layer = 1 << 25;
-        felt.addComponent(UITransform).setContentSize(1280, 720);
+        felt.addComponent(UITransform).setContentSize(this.vw, 720);
         const g = felt.addComponent(Graphics);
         // 木沿
-        g.roundRect(-634, -354, 1268, 708, 24);
+        g.roundRect(-this.vw / 2 + 6, -354, this.vw - 12, 708, 24);
         g.lineWidth = 8;
         g.strokeColor = new Color(96, 72, 38, 255);
         g.stroke();
         // 桌面基底（暗角）
-        g.roundRect(-629, -349, 1258, 698, 20);
+        g.roundRect(-this.vw / 2 + 11, -349, this.vw - 22, 698, 20);
         g.fillColor = new Color(9, 42, 31, 255);
         g.fill();
         // 主桌面
-        g.roundRect(-560, -282, 1120, 564, 28);
+        g.roundRect(-this.tw / 2, -282, this.tw, 564, 28);
         g.fillColor = new Color(13, 54, 40, 255);
         g.fill();
         // 中心提亮椭圆（模拟灯光照射）
@@ -248,7 +259,7 @@ export class TableUI extends Component {
         g.fillColor = new Color(16, 61, 45, 255);
         g.fill();
         // 内圈金线
-        g.roundRect(-560, -282, 1120, 564, 28);
+        g.roundRect(-this.tw / 2, -282, this.tw, 564, 28);
         g.lineWidth = 1.5;
         g.strokeColor = new Color(200, 165, 70, 60);
         g.stroke();
@@ -752,57 +763,83 @@ export class TableUI extends Component {
     // ==================== 手牌 ====================
 
     private renderHand(): void {
-        // 旧节点可能还有按压回弹动画在跑：先停 tween 再销毁，避免操作已销毁节点
         for (const n of this.handNodes.values()) Tween.stopAllByTarget(n);
         this.handNode.removeAllChildren();
         this.handNodes.clear();
+        this.handBaseY.clear();
         const hand = this.snap?.yourHand ?? [];
         const n = hand.length;
         if (n === 0) return;
-        // 39 张牌排开（牌宽 56）：横屏按 1100 上限，窄窗口/竖屏按可见宽度收缩，避免手牌被裁
-        const cardW = 56;
-        const vw = view.getVisibleSize().width;
-        const maxSpread = Math.min(1100, vw - 60);
-        const gap = 16;   // 组间额外间隙（副牌按花色分堆 + 主牌一堆）
-        const groups = this.groupCount(hand);
-        const gapTotal = Math.max(groups - 1, 0) * gap;
-        const spacing = n > 1 ? Math.min(cardW - 12, (maxSpread - cardW - gapTotal) / (n - 1)) : cardW;
-        const total = spacing * (n - 1) + gapTotal;
 
-        // 排序后的显示顺序（原始下标数组），选中仍按原始下标记
+        // 【T-701 手牌分两行】三副牌每人 39 张、牌宽 56：
+        // 单行 spacing = (1100-56-gapTotal)/38 ≈ 25 → 每张只露出 45%，
+        // 命中区真机只有约 17pt（iOS 建议 ≥44pt）→ 既看不清也点不准。
+        // 分两行后每行约 20 张，spacing 顶到上限 44 → 露出 78%、命中区约 30pt。
+        const cardW = 56;
+        const NICE = cardW - 12;                    // 44：再密就看不清牌面
+        const gap = 16;                             // 组间额外间隙
+        const maxSpread = Math.min(1500, this.vw - 60);
         const order = this.sortHand(hand);
+
+        // 一行超过 23 张就开始挤（间距跌破 44），再多就分两行
+        const rows = n > 23 ? 2 : 1;
+        let split = n;
+        if (rows === 2) {
+            // 切分点优先落在花色组边界上，避免同一堆牌被拆到两行
+            const mid = Math.ceil(n / 2);
+            let best = mid, bestDist = 99;
+            for (let i = Math.max(1, mid - 4); i <= Math.min(n - 1, mid + 4); i++) {
+                if (this.groupOf(hand[order[i]]) !== this.groupOf(hand[order[i - 1]])) {
+                    const d = Math.abs(i - mid);
+                    if (d < bestDist) { bestDist = d; best = i; }
+                }
+            }
+            split = best;
+        }
+
+        // 两行：前半（主牌堆在前）在上行 +6，后半在下行 -70。行距 76 < 牌高 80，
+        // 重叠 4 单位让两行像紧贴的一摞；FIXED_HEIGHT 下可见 y∈±360，上下都不越界。
+        const rowDefs: number[][] = rows === 2 ? [order.slice(0, split), order.slice(split)] : [order];
+        const rowY: number[] = rows === 2 ? [6, -70] : [0];
+        for (let r = 0; r < rowDefs.length; r++) {
+            this.layoutHandRow(rowDefs[r], rowY[r], hand, cardW, NICE, gap, maxSpread);
+        }
+    }
+
+    /** 摆一行手牌：间距按本行张数独立算（两行时每行都够松）。 */
+    private layoutHandRow(idxs: number[], baseY: number, hand: string[], cardW: number,
+                          nice: number, gap: number, maxSpread: number): void {
+        const m = idxs.length;
+        if (m === 0) return;
+        let gapTotal = 0;
+        for (let i = 1; i < m; i++) {
+            if (this.groupOf(hand[idxs[i]]) !== this.groupOf(hand[idxs[i - 1]])) gapTotal += gap;
+        }
+        const spacing = m > 1 ? Math.min(nice, (maxSpread - cardW - gapTotal) / (m - 1)) : cardW;
+        const total = spacing * (m - 1) + gapTotal;
         let x = -total / 2;
         let prevGroup = -1;
-        for (let i = 0; i < n; i++) {
-            const idx = order[i];
+        for (let i = 0; i < m; i++) {
+            const idx = idxs[i];
             const g = this.groupOf(hand[idx]);
             if (i > 0 && g !== prevGroup) x += gap;   // 换组加间隙
             prevGroup = g;
-            const cardCode = hand[idx];
-            const card = createCardNode(cardCode);
-            // 用复合身份 "code#occurrence" 判断选中（不是按下标、也不是纯代码）：
-            // 重画整手时保留选中视觉，且能区分三副牌里的重复代码
+            const card = createCardNode(hand[idx]);
+            // 复合身份 "code#occurrence"：快照重排不影响，三副牌重复代码也能区分
             const key = this.cardKey(hand, idx);
             const selected = this.selected.indexOf(key) >= 0;
-            card.setPosition(x, selected ? 18 : 0, 0);
+            this.handBaseY.set(key, baseY);
+            card.setPosition(x, baseY + (selected ? 12 : 0), 0);
             if (selected) drawCardBg(card, true);
-            // 牌面 56 宽但牌多时间距只有 ~40 → 互相重叠。命中区必须缩到 spacing 宽，
-            // 否则点左侧露出部分会命中左边那张（视觉错位）。
-            // 【真机必修】子节点（点数/花色 Label）各自带 56 宽 UITransform，同样参与命中测试；
-            // 只缩父节点等于没缩，点到的仍是相邻那张 —— 子节点必须一起收缩。
+            // 命中区缩到 spacing 宽，子节点必须一起缩（见 MEMORY 铁律）
             const hitW = Math.min(spacing, cardW);
             card.getComponent(UITransform)!.setContentSize(hitW, 80);
             for (const child of card.children) {
                 const cut = child.getComponent(UITransform);
                 if (cut) cut.setContentSize(hitW, cut.contentSize.height);
             }
-            // 点击手感：按下缩、松手回弹
             card.on(Node.EventType.TOUCH_START, () => {
                 tween(card).to(0.08, { scale: new Vec3(0.94, 0.94, 1) }, { easing: 'quadOut' }).start();
-                // 【真机必修】按下即选中：真机手指轻微滑动会把 TOUCH_END 变成 TOUCH_CANCEL，
-                // 选中逻辑挂在 TOUCH_END 上会表现为"点了没反应"。
-                // 模拟器用鼠标点击无抖动，所以这个问题在模拟器上根本测不出来。
-                // 传复合身份（不是下标、也不是纯代码）：快照重排不影响，重复代码也能区分。
                 this.toggleSelect(key, card);
             });
             card.on(Node.EventType.TOUCH_END, () => {
@@ -830,7 +867,8 @@ export class TableUI extends Component {
         if (on) this.selected.splice(i, 1);
         else this.selected.push(key);
         drawCardBg(card, !on);
-        tween(card).to(0.12, { position: new Vec3(card.position.x, !on ? 18 : 0, 0) },
+        const baseY = this.handBaseY.get(key) ?? 0;   // 两行后基础 y 不再是 0
+        tween(card).to(0.12, { position: new Vec3(card.position.x, baseY + (!on ? 12 : 0), 0) },
             { easing: 'backOut' }).start();
         // 选中变化会影响按钮文案（"出牌：先选牌" → "出牌"）
         this.renderButtons();
@@ -875,12 +913,6 @@ export class TableUI extends Component {
         if (this.isTrumpCard(code)) return 0;
         const g = TableUI.SIDE_ORDER.indexOf(suit);
         return g >= 0 ? g + 1 : 4;
-    }
-
-    private groupCount(hand: string[]): number {
-        const set = new Set<number>();
-        for (const c of hand) set.add(this.groupOf(c));
-        return set.size;
     }
 
     /**
