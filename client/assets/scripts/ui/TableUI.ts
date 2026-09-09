@@ -411,12 +411,16 @@ export class TableUI extends Component {
         l.verticalAlign = Label.VerticalAlign.CENTER;
         n.addChild(txt);
         n.setPosition(x, 0, 0);
+        // 【真机必修】回调挂在 TOUCH_START：真机手指轻微滑动会把 TOUCH_END 变成 TOUCH_CANCEL，
+        // 按钮会表现为"按了没反应"。按下即触发 + 松手回弹，是移动端按钮的标准做法。
+        let fired = false;
         n.on(Node.EventType.TOUCH_START, () => {
             tween(n).to(0.06, { position: new Vec3(x, -4, 0) }, { easing: 'quadOut' }).start();
+            if (!fired) { fired = true; cb(); }
         });
         n.on(Node.EventType.TOUCH_END, () => {
             tween(n).to(0.12, { position: new Vec3(x, 0, 0) }, { easing: 'backOut' }).start();
-            cb();
+            fired = false;
         });
         n.on(Node.EventType.TOUCH_CANCEL, () => {
             tween(n).to(0.12, { position: new Vec3(x, 0, 0) }, { easing: 'backOut' }).start();
@@ -613,8 +617,12 @@ export class TableUI extends Component {
         }
         const phase = TableUI.PHASE_TEXT[s.phase] ?? s.phase;
         const trump = s.trump ? `${s.trump.suit[0]}${s.trump.level}` : '未定';
+        // 诊断行（真机适配排查用）：显示实际可见区域与手牌张数。
+        // 若"视口"高度明显小于 720，说明屏幕比例导致上下内容被裁（手牌会掉出屏幕）。
+        const vs = view.getVisibleSize();
         this.topLabel.string =
             `第${s.gameNumber}局 ${phase} | 级${s.level} 主${trump} | 庄${s.banker ?? '-'} 轮${s.turn ?? '-'}`
+            + ` | 手牌${(s.yourHand ?? []).length} 视口${Math.round(vs.width)}x${Math.round(vs.height)}`
             + `${this.net?.online ? '' : '  ⚠ 离线'}`;
 
         // 本墩分 + 各家分（醒目色）
@@ -764,16 +772,26 @@ export class TableUI extends Component {
             const selected = this.selected.has(idx);
             card.setPosition(x, selected ? 18 : 0, 0);
             if (selected) drawCardBg(card, true);
-            // 牌面 56 宽但间距 44 互相重叠：命中区缩为一张 spacing 宽，
-            // 否则点牌的右侧露出部分会命中叠在上面的右边那张（视觉错位）
-            card.getComponent(UITransform)!.setContentSize(Math.min(spacing, cardW), 80);
-            // 点击手感：按下缩、松手回弹 + 选中弹起（不再全量重建手牌）
+            // 牌面 56 宽但牌多时间距只有 ~40 → 互相重叠。命中区必须缩到 spacing 宽，
+            // 否则点左侧露出部分会命中左边那张（视觉错位）。
+            // 【真机必修】子节点（点数/花色 Label）各自带 56 宽 UITransform，同样参与命中测试；
+            // 只缩父节点等于没缩，点到的仍是相邻那张 —— 子节点必须一起收缩。
+            const hitW = Math.min(spacing, cardW);
+            card.getComponent(UITransform)!.setContentSize(hitW, 80);
+            for (const child of card.children) {
+                const cut = child.getComponent(UITransform);
+                if (cut) cut.setContentSize(hitW, cut.contentSize.height);
+            }
+            // 点击手感：按下缩、松手回弹
             card.on(Node.EventType.TOUCH_START, () => {
                 tween(card).to(0.08, { scale: new Vec3(0.94, 0.94, 1) }, { easing: 'quadOut' }).start();
+                // 【真机必修】按下即选中：真机手指轻微滑动会把 TOUCH_END 变成 TOUCH_CANCEL，
+                // 选中逻辑挂在 TOUCH_END 上会表现为"点了没反应"。
+                // 模拟器用鼠标点击无抖动，所以这个问题在模拟器上根本测不出来。
+                this.toggleSelect(idx, card);
             });
             card.on(Node.EventType.TOUCH_END, () => {
                 tween(card).to(0.12, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
-                this.toggleSelect(idx, card);
             });
             card.on(Node.EventType.TOUCH_CANCEL, () => {
                 tween(card).to(0.12, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
