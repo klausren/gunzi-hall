@@ -35,7 +35,9 @@
 **Demo**：一部手机建房，3 个 bot 补位，真人入座自动开局。
 
 **后端配合任务**（非关键路径，穿插做）：
-- T-510：WS 鉴权——会话令牌绑定 playerId（体检发现的 🔴 漏洞：目前可冒充任意玩家）
+- T-510：WS 鉴权——会话令牌绑定 playerId（体检发现的 🔴 漏洞：目前可冒充任意玩家）→ ✅ **已完成**（2026-09-09 核对）
+  - 实现：`game-room/src/main/java/com/gunzihall/room/SessionRegistry.java`——join 成功后签发 UUID token，绑定 `(roomId, playerId)` 并带 TTL；后续 `cmd` / `snapshot` 必须携带 token，服务端**以 token 解析出的 playerId 为准**，不信任客户端上报
+  - 验证：`SessionAuthTest` 三层攻击面（①无 token 调用 ②伪造 token ③持自己 token 谎报他人 playerId 出牌），4 个用例全绿
 - T-511：RedisStateStore 异步化 + 故障降级内存
 
 ---
