@@ -358,4 +358,19 @@ public final class GameRoom {
         tributeReceived.clear();
         tributeReturned.clear();
     }
+
+    /**
+     * 【强制重开】把房间拉回 WAITING 状态，用于"新局"按钮。
+     *
+     * <p>为什么不能走 {@link #transitionTo}：状态机只允许 ordinal 顺序前进
+     * （见 GamePhase.canTransitionTo），PLAYING/SETTLE 等阶段跳回 WAITING 会抛
+     * IllegalStateException。而"重开一局"是玩家主动的显式意图，不属于正常流转，
+     * 因此这里提供一个显式的强制入口，绕开顺序校验。
+     *
+     * <p>只重置一局的进行中状态（回合/主牌/底牌/进贡），保留座位、玩家与分数。
+     */
+    public void hardResetToWaiting() {
+        resetRoundState();
+        this.phase = GamePhase.WAITING;
+    }
 }

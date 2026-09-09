@@ -35,6 +35,87 @@ export function cardFace(code: string): { text: string; color: Color } {
     };
 }
 
+/**
+ * 花色矢量绘制（子节点 Graphics）。
+ *
+ * 【为什么不用 Unicode 字符 ♠♥♦♣】
+ * 这些符号走系统字渲染，笔画极细且 isBold 对其无效，在真机高分辨率屏上
+ * 位图放大后发虚、糊成一团（任老师 2026-09-09 反馈"花色不清晰"）。
+ * 改用 Graphics 画矢量路径：任意缩放都锐利，且形状/粗细完全可控。
+ *
+ * 坐标以 (cx, cy) 为中心，size 为外接方框边长。
+ * 命中区注意：子节点 UITransform 同样参与命中测试（见 MEMORY 铁律），
+ * 因此这里把尺寸严格限制为 size×size，不做全宽 56。
+ */
+function addSuitGraphic(parent: Node, suitKey: string,
+                        cx: number, cy: number, size: number, color: Color): void {
+    const n = new Node('suit');
+    n.layer = 1 << 25;
+    n.addComponent(UITransform).setContentSize(size, size);
+    const g = n.addComponent(Graphics);
+    g.fillColor = color;
+    g.strokeColor = color;
+    g.lineWidth = 0;
+
+    const w = size, h = size;
+    const hw = w / 2, hh = h / 2;
+
+    switch (suitKey) {
+        case 'H': { // ♥ 红桃：底部尖点 + 上方两个圆瓣
+            g.moveTo(0, -hh);
+            g.bezierCurveTo(-hw, -h * 0.15, -hw, hh, 0, h * 0.28);
+            g.bezierCurveTo(hw, hh, hw, -h * 0.15, 0, -hh);
+            g.close();
+            g.fill();
+            break;
+        }
+        case 'S': { // ♠ 黑桃：倒置心形 + 底部茎
+            g.moveTo(0, hh);
+            g.bezierCurveTo(-hw, h * 0.15, -hw, -hh * 0.7, 0, -hh * 0.15);
+            g.bezierCurveTo(hw, -hh * 0.7, hw, h * 0.15, 0, hh);
+            g.close();
+            g.fill();
+            // 茎：上窄下宽的梯形
+            g.moveTo(-w * 0.09, -hh * 0.62);
+            g.lineTo(w * 0.09, -hh * 0.62);
+            g.lineTo(w * 0.20, -hh);
+            g.lineTo(-w * 0.20, -hh);
+            g.close();
+            g.fill();
+            break;
+        }
+        case 'D': { // ♦ 方块：菱形
+            g.moveTo(0, hh);
+            g.lineTo(hw, 0);
+            g.lineTo(0, -hh);
+            g.lineTo(-hw, 0);
+            g.close();
+            g.fill();
+            break;
+        }
+        case 'C': { // ♣ 梅花：三圆 + 茎
+            const r = w * 0.23;
+            g.circle(0, h * 0.18, r);
+            g.fill();
+            g.circle(-w * 0.25, -h * 0.10, r);
+            g.fill();
+            g.circle(w * 0.25, -h * 0.10, r);
+            g.fill();
+            g.moveTo(-w * 0.07, -h * 0.05);
+            g.lineTo(w * 0.07, -h * 0.05);
+            g.lineTo(w * 0.20, -hh);
+            g.lineTo(-w * 0.20, -hh);
+            g.close();
+            g.fill();
+            break;
+        }
+        default:
+            break;
+    }
+    n.setPosition(cx, cy, 0);
+    parent.addChild(n);
+}
+
 /** 花色选择按钮用的中文描述 */
 export const SUIT_OPTIONS: { suit: string; label: string }[] = [
     { suit: 'SPADE', label: '♠' },
@@ -66,8 +147,10 @@ export function createCardNode(code: string): Node {
         const rank = parseInt(code.slice(1), 10);
         const rankText = RANK_TEXT[rank] ?? String(rank);
         const color = suit?.red ? new Color(200, 30, 30, 255) : new Color(30, 30, 30, 255);
-        addFaceLabel(node, rankText, 0, 10, 26, color);      // 点数大字
-        if (suit) addFaceLabel(node, suit.ch, 0, -18, 20, color); // 花色符号
+        // 点数：Label 加粗加大（数字/字母用系统字够清晰，bold 对它们有效）
+        addFaceLabel(node, rankText, 0, 11, 30, color);
+        // 花色：矢量绘制（不再用 Unicode ♠♥♦♣，真机上发虚）
+        if (suit) addSuitGraphic(node, code[0], 0, -15, 22, color);
     }
 
     node.userData = { code };
@@ -108,8 +191,9 @@ export function createMiniCardNode(code: string): Node {
         const rank = parseInt(code.slice(1), 10);
         const rankText = RANK_TEXT[rank] ?? String(rank);
         const color = suit?.red ? new Color(200, 30, 30, 255) : new Color(30, 30, 30, 255);
-        addMiniText(node, rankText, 0, 6, 18, color);
-        if (suit) addMiniText(node, suit.ch, 0, -10, 13, color);
+        addMiniText(node, rankText, 0, 7, 20, color);
+        // 花色同样改矢量（迷你牌只有 32×46，Unicode 符号在这里几乎糊成一坨）
+        if (suit) addSuitGraphic(node, code[0], 0, -10, 14, color);
     }
     return node;
 }

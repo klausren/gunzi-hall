@@ -279,6 +279,19 @@ public final class RoomActor {
                     CardCodec.decodeAll(spec.cards()));
             case "SETTLE" -> applyLogged(new SettleRoundCommand(roomId, pid),
                     "SETTLE", pid, logOf("SETTLE", pid, null, null, null, null, null), List.of());
+            // 【新局】玩家点"新局"重开：强制回到 WAITING 再发牌。
+            // 背景：战斗服是长跑的，牌局一直由 bot 驱动推进，玩家 join 进来时
+            // 往往已经打了一半（任老师 2026-09-09 反馈"预览时牌局已进行一段"）。
+            // 这里同时清 stuck，让之前若因异常停摆的驱动恢复。
+            case "NEWGAME" -> {
+                room.hardResetToWaiting();
+                stuck = false;
+                if (room.isFull()) {
+                    deal();
+                } else {
+                    emit("NEWGAME", pid, false, "房间未满 4 人，无法开新局", List.of());
+                }
+            }
             default -> emit("UNKNOWN_OP", pid, false, "未知命令: " + spec.op(), List.of());
         }
     }

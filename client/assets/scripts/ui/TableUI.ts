@@ -1037,6 +1037,14 @@ export class TableUI extends Component {
                 break;
             }
         }
+
+        // 【常驻】新局按钮：战斗服是长跑的，牌局一直被 bot 推进，
+        // 玩家进来时往往已经打了一半（"预览时牌局已进行一段"）。
+        // 放最右侧 x=420，与其他阶段按钮（x 范围 -240~240）不重叠。
+        this.makeButton('新局', 420, () => {
+            this.selected.length = 0;
+            this.net?.sendCmd('NEWGAME');
+        });
     }
 
     // ==================== 事件提示 ====================

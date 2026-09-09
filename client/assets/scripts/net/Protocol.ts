@@ -40,7 +40,8 @@ export type CmdType =
     | 'RETURN_TRIBUTE'  // 还贡
     | 'BURY'            // 扣底
     | 'PLAY'            // 出牌
-    | 'SETTLE';         // 结算（服务端驱动）
+    | 'SETTLE'          // 结算（服务端驱动）
+    | 'NEWGAME';        // 新局（重开发牌，客户端"新局"按钮触发）
 
 export interface CmdMsg {
     op: 'cmd';
