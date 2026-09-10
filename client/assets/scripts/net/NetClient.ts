@@ -102,18 +102,38 @@ export class NetClient {
         this.stateHandler?.(false);
     }
 
+    /**
+     * 立即重连（UI"重试连接"用）：清空指数退避并强制重建连接。
+     * 用于开发期连不上时的人工重试——否则退避拉到 15s，玩家只能干等。
+     */
+    reconnectNow(): void {
+        this.stopHeartbeat();
+        this.stopReconnect();
+        this.reconnectAttempts = 0;
+        this.manuallyClosed = false;
+        const old = this.ws;
+        this.ws = null;              // 先摘掉引用：旧连接的 onclose 会因 ws !== this.ws 而自我忽略
+        try { old?.close(); } catch { /* ignore */ }
+        this.connect();
+    }
+
     // ==================== 连接与心跳 ====================
 
     private connect(): void {
         this.stopHeartbeat();
         this.stopReconnect();
+        let ws: WebSocket;
         try {
-            this.ws = new WebSocket(this.url);
+            ws = new WebSocket(this.url);
         } catch (e) {
             this.scheduleReconnect();
             return;
         }
-        this.ws.onopen = () => {
+        this.ws = ws;
+        // 所有回调都先校验"我是不是当前这条连接"：避免旧连接的 onclose
+        // 触发新连接的 scheduleReconnect（双连接 / 状态被旧连接回滚）。
+        ws.onopen = () => {
+            if (this.ws !== ws) return;
             this.reconnectAttempts = 0;
             this.missedPong = 0;
             this.stateHandler?.(true);
@@ -123,16 +143,21 @@ export class NetClient {
             });
             this.startHeartbeat();
         };
-        this.ws.onmessage = (ev: MessageEvent) => this.handleMessage(String(ev.data));
-        this.ws.onclose = () => {
+        ws.onmessage = (ev: MessageEvent) => {
+            if (this.ws !== ws) return;
+            this.handleMessage(String(ev.data));
+        };
+        ws.onclose = () => {
+            if (this.ws !== ws) return;
             this.stateHandler?.(false);
             this.stopHeartbeat();
             this.token = null; // 连接已断，token 随新连接重新签发
+            this.ws = null;
             if (!this.manuallyClosed) {
                 this.scheduleReconnect();
             }
         };
-        this.ws.onerror = () => { /* onclose 会跟着触发，统一在 onclose 处理 */ };
+        ws.onerror = () => { /* onclose 会跟着触发，统一在 onclose 处理 */ };
     }
 
     private startHeartbeat(): void {

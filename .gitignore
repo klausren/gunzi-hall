@@ -42,3 +42,8 @@ runs/
 *.pem
 *.key
 secrets/
+
+# 编辑器/脚本临时备份（曾误入 assets 被 Cocos 当资源）
+*.bak
+*.bak.meta
+*.orig

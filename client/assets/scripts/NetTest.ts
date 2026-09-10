@@ -23,7 +23,7 @@ export class NetTest extends Component {
     // 必须填电脑的局域网 IP，且手机与电脑连同一 WiFi。
     // 换 WiFi 后 IP 会变 —— main.scene / TableUI.ts / NetTest.ts 三处都要改。
     @property
-    serverUrl = 'ws://10.192.0.121:8080/ws';
+    serverUrl = 'ws://10.192.1.110:8080/ws';
 
     @property
     roomId = 1001;

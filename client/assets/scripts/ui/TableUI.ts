@@ -30,7 +30,7 @@ export class TableUI extends Component {
     // 默认值仅作兜底，运行时以 main.scene 里挂载的 serverUrl 为准。
     // 【真机调试必读】手机上的 localhost 是手机自己，必须填电脑的局域网 IP，
     // 且手机与电脑连同一 WiFi。换 WiFi 后 IP 会变，两处都要改。
-    @property serverUrl = 'ws://10.192.0.121:8080/ws';
+    @property serverUrl = 'ws://10.192.1.110:8080/ws';
     @property roomId = 1001;
     @property playerId = 1;
     @property mySeat: SeatName = 'NORTH';
@@ -632,8 +632,14 @@ export class TableUI extends Component {
     private renderTop(): void {
         const s = this.snap;
         if (!s) {
-            this.topLabel.string = this.net?.online ? '已连接，等待快照…' : '连接中…';
-            this.scoreLabel.string = '';
+            // 【T-703 可诊断连接态】原来只显示"连接中…"，玩家完全不知道连的是谁、
+            // 为什么连不上、该找谁——真人真机排查时只能干看着（"什么也做不了"）。
+            // 现在把地址与可能原因直接打在顶栏，并配合"重试/新局"常驻按钮。
+            const url = this.serverUrl || '(未配置 serverUrl)';
+            this.topLabel.string = this.net?.online
+                ? `已连接 ${url} · 等待服务器数据…`
+                : `连接不上 ${url}（手机需与电脑同一 WiFi；校园网可能禁止设备互访）`;
+            this.scoreLabel.string = this.net?.online ? '' : '提示：可在本机终端跑 start.command 启动战斗服';
             return;
         }
         const phase = TableUI.PHASE_TEXT[s.phase] ?? s.phase;
@@ -1005,6 +1011,17 @@ export class TableUI extends Component {
         this.btnNode.children.forEach(c => Tween.stopAllByTarget(c));
         this.btnNode.removeAllChildren();
         const s = this.snap;
+
+        // 【T-703 常驻自救按钮】不能等 this.snap 到位才创建按钮：
+        // 之前 `if (!s) return` 会让"还没收到第一帧/连不上"时整个按钮区空白，
+        // 玩家在手机上完全无操作可做（"感觉什么也做不了"）。
+        // 未连上 → "重试连接"（强制退出退避、立即重连）；已连上 → "新局"。
+        const online = this.net?.online === true;
+        this.makeButton(online ? '新局' : '重试连接', 420, () => {
+            this.selected.length = 0;
+            if (online) { this.net?.sendCmd('NEWGAME'); } else { this.net?.reconnectNow(); }
+        });
+
         if (!s) return;
         const myTurn = s.turn === this.mySeat;
         switch (s.phase) {
@@ -1070,13 +1087,7 @@ export class TableUI extends Component {
             }
         }
 
-        // 【常驻】新局按钮：战斗服是长跑的，牌局一直被 bot 推进，
-        // 玩家进来时往往已经打了一半（"预览时牌局已进行一段"）。
-        // 放最右侧 x=420，与其他阶段按钮（x 范围 -240~240）不重叠。
-        this.makeButton('新局', 420, () => {
-            this.selected.length = 0;
-            this.net?.sendCmd('NEWGAME');
-        });
+        // 【常驻】新局按钮已上移到函数开头（不依赖 snapshot，连不上时显示"重试连接"）
     }
 
     // ==================== 事件提示 ====================
