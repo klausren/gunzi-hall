@@ -19,6 +19,13 @@ public final class ServerMain {
     public static void main(String[] args) throws Exception {
         int port = args.length > 0 ? Integer.parseInt(args[0]) : 8080;
         long roomId = args.length > 1 ? Long.parseLong(args[1]) : 1001;
+        // 第 3 个参数：真人超时托管时长（毫秒），不给则默认 32s（正式体验用）。
+        // 验收/回归时传小值（如 1500）能让人不动也把一局快速推完 ——
+        // 默认 32s 下一次约 40 轮，光等托管就要 20 多分钟，不便于走完整局。
+        long turnTimeoutMs = args.length > 2 ? Long.parseLong(args[2]) : 32_000;
+        if (turnTimeoutMs < 0) {
+            throw new IllegalArgumentException("非法超时托管时长: " + turnTimeoutMs);
+        }
 
         RoomStateStore store = RedisStateStore.available(REDIS_URI)
                 ? new RedisStateStore(REDIS_URI)
@@ -27,7 +34,7 @@ public final class ServerMain {
 
         RoomManager manager = new RoomManager(store, 150);
         manager.setThinkTime(800, 2500);   // T-701 拟人化：bot 每步随机思考 0.8~2.5s
-        manager.setTurnTimeout(32_000);    // T-704 超时托管：真人 32s 未行动由系统代打
+        manager.setTurnTimeout(turnTimeoutMs); // T-704 超时托管：真人未行动由系统代打
         RoomActor room = manager.create(roomId, Set.of(Seat.EAST, Seat.SOUTH, Seat.WEST));
 
         GameServer server = new GameServer(port, manager);
@@ -35,6 +42,7 @@ public final class ServerMain {
         System.out.println("=== 打滚子战斗服已启动 ===");
         System.out.println("WebSocket: ws://localhost:" + bound + "/ws");
         System.out.println("房间 " + roomId + ": EAST/SOUTH/WEST 为 bot，NORTH 留给真人");
+        System.out.println("超时托管: " + (turnTimeoutMs <= 0 ? "已关闭" : turnTimeoutMs + "ms"));
         System.out.println("客户端协议：{\"op\":\"join\",\"roomId\":" + roomId
                 + ",\"playerId\":1,\"seat\":\"NORTH\"}");
         System.out.println("Ctrl+C 退出");
