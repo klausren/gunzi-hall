@@ -42,11 +42,20 @@ Write-Step "Output  : $BuildPath"
 # ---------- 2. 同步 serverUrl 为本机局域网 IP（真机调试需要，任老师 .sh 同款逻辑）----------
 function Get-LanIp {
     try {
-        $ip = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
-            Where-Object { $_.IPAddress -notmatch '^127\.' -and $_.IPAddress -ne '0.0.0.0' } |
-            Sort-Object -Property InterfaceMetric |
-            Select-Object -First 1).IPAddress
-        if ($ip) { return $ip }
+        $cands = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+            Where-Object {
+                $_.IPAddress -notmatch '^127\.' -and
+                $_.IPAddress -ne '0.0.0.0' -and
+                $_.IPAddress -notmatch '^169\.254\.'   # APIPA：虚拟网卡/没拿到 DHCP，真机连不通
+            })
+        if ($cands.Count -eq 0) { return "localhost" }
+        # 按「真实局域网」优先级取：192.168.* > 10.* > 172.16~31.*
+        foreach ($prefix in @('^192\.168\.', '^10\.', '^172\.(1[6-9]|2[0-9]|3[01])\.')) {
+            $hit = $cands | Where-Object { $_.IPAddress -match $prefix } |
+                Sort-Object -Property InterfaceMetric | Select-Object -First 1
+            if ($hit) { return $hit.IPAddress }
+        }
+        return ($cands | Sort-Object -Property InterfaceMetric | Select-Object -First 1).IPAddress
     } catch { }
     return "localhost"
 }
@@ -64,7 +73,10 @@ if (-not $PatchOnly) {
     foreach ($rel in $targets) {
         $p = Join-Path $Project $rel
         if (-not (Test-Path -LiteralPath $p)) { Write-Warn "跳过（不存在）: $rel"; continue }
-        $src = Get-Content -LiteralPath $p -Raw
+        # 【坑】PS 5.1 的 Get-Content 不带 -Encoding 时按系统 ANSI(中文 Windows=GBK) 解码，
+        # 会把 UTF-8 源文件读成乱码，再以 UTF-8 写回即二次编码、不可逆损坏源码。
+        # 因此这里强制用 .NET 的 UTF8 读取，与 Write-Utf8NoBom 严格配对。
+        $src = [System.IO.File]::ReadAllText($p, (New-Object System.Text.UTF8Encoding($false)))
         $new = [regex]::Replace($src, $pat, $newUrl)
         if ($new -ne $src) {
             Write-Utf8NoBom -Path $p -Content $new
