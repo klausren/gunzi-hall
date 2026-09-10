@@ -34,7 +34,9 @@ const RANK_TEXT: Record<number, string> = { 11: 'J', 12: 'Q', 13: 'K', 14: 'A' }
  */
 export function suitColor(suitKey: string): Color {
     if (suitKey === 'H' || suitKey === 'D') return new Color(200, 30, 30, 255);
-    if (suitKey === 'S') return new Color(26, 46, 110, 255);   // ♠ 深蓝
+    // ♠ 深蓝：初版用 (26,46,110) 实测在真机 22px 图标上仍"看像黑"，
+    // 提到 (28,72,170) —— 白底上明确是蓝，但仍属深色系，不破坏牌面观感。
+    if (suitKey === 'S') return new Color(28, 72, 170, 255);
     return new Color(30, 30, 30, 255);                          // ♣ 纯黑
 }
 
