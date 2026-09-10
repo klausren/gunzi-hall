@@ -118,6 +118,15 @@ mvn -pl game-room exec:java -Dexec.mainClass=com.gunzihall.room.ServerMain -Dexe
 
 > 控制台出现 bot 自动开局 / 出牌日志即成功。战斗服监听 `ws://localhost:8080/ws`。
 
+> ⚠️ **一个房间目前只支持 1 个真人**：`ServerMain` 用 `manager.create(roomId, Set.of(Seat.EAST, Seat.SOUTH, Seat.WEST))` 把三个座位交给 bot，**只有 NORTH 留给真人**。所以**两个人不要同时连同一个战斗服**（会抢 NORTH 座位、互相把对方踢下线）。**各自在自己电脑上跑各自的战斗服即可，互不影响**。
+>
+> 验证服务端是否正常（零依赖探针，任选其一）：
+> ```powershell
+> python tools\ws_probe.py --silent     # 只验握手
+> python tools\ws_probe.py              # 验握手 + 入座 + 看快照
+> ```
+> （Windows 端若 python 走了系统代理导致连不上，可先 `set no_proxy=*`）
+
 ---
 
 ## 6. 第三步：打开客户端（Cocos Creator）
@@ -127,25 +136,43 @@ mvn -pl game-room exec:java -Dexec.mainClass=com.gunzihall.room.ServerMain -Dexe
 3. **首次打开会自动导入资源、生成 `library/` 缓存，需要几分钟**——`library/ temp/ build/ profiles/` 都被 `.gitignore` 排除，clone 下来没有，属正常现象
 4. 导入完成后，打开场景 `assets/scenes/main`，点编辑器顶部 **▶ 预览** 即可在浏览器看到牌桌
 
-> **本地联调注意**：场景里 `serverUrl` 目前写的是任老师电脑的局域网 IP `ws://10.192.0.121:8080/ws`。你自己跑战斗服时，要把它改成 `ws://localhost:8080/ws`（或你自己电脑的局域网 IP）。
+> **本地联调注意（2026-09-10 更新）**：`serverUrl` **不再写死任老师的 IP**。
+> 构建脚本（`.sh` / `.ps1`）会在**构建时自动同步成本机局域网 IP**，所以：
+> - **你自己跑战斗服** → 直接构建即可，地址自动指向你自己的电脑
+> - **想连任老师的战斗服**（需同一 WiFi）→ 手动把 `client/assets/scripts/ui/TableUI.ts` + `assets/scenes/main.scene` 里的 serverUrl 改成任老师当前的 IP；**改完必须重新构建**才生效
+> - 只想改已构建产物、不想重跑构建 → 直接改 `build/wechatgame/assets/main/index.js` 里的 `ws://...` 字符串
+>
+> 验证服务端是否正常：`env no_proxy='*' python3 tools/ws_probe.py --silent`（零依赖，见 `tools/ws_probe.py`）
+> ⚠️ 真机连不上时先分清两种"已连接"：**开发者工具右上角的绿点**是「手机↔开发者工具」的调试通道，**不等同于**「手机↔战斗服」通了；以**游戏顶栏**显示的状态为准。
 
 ---
 
-## 7. 第四步：微信小游戏构建（Windows 特别注意）
+## 7. 第四步：微信小游戏构建（Windows）
 
-### 现状分工
+### ✅ Windows 已有对等脚本（2026-09-10 补齐）
 
-**微信小游戏构建目前统一由任老师（macOS）出产物**。原因是：现有构建脚本 `client/build-wechatgame.sh` 是 **bash + macOS 专用**（硬编码了 macOS 的 Cocos 路径、依赖 `python3`），Windows 上跑不了。
+`client/build-wechatgame.ps1` —— 与 macOS 的 `.sh` 版本功能对等，队友已修复「源码编码损坏」与「局域网 IP 选错」两个坑：
 
-### Windows 成员如果要自己构建
+```powershell
+cd client
+.\build-wechatgame.ps1              # 完整流程：同步 serverUrl -> Cocos 构建 -> 打补丁
+.\build-wechatgame.ps1 -PatchOnly   # 跳过构建，只做补丁（改了产物想快速重打时用）
+```
 
-走 **Cocos Creator GUI 发布**（构建面板 → 平台选"微信小游戏"）——但**必须手动补丁**，否则必踩坑（这几项就是 §8.1 的血泪教训）：
+它做的事与 `.sh` 一致：
+1. 自动同步 `serverUrl` 为**本机局域网 IP**（`Get-NetIPAddress`）
+2. `game.json` 覆写成 6 字段（见 §8.1）
+3. `project.config.json` 修 `libVersion="3.7.9"` / `appid` / `compileType=game`
+4. 归一化 `assets/` 下文件名为小写（防微信端黑屏，见 §8.2）
+5. 主包体积守卫（4MB）
+
+### 若仍想走 Cocos GUI 手动构建
+
+构建面板 → 平台选"微信小游戏" —— 但**必须手动补丁**，否则必踩坑：
 
 1. **`build/wechatgame/game.json` 改写成 6 字段**（见 §8.1 模板）
 2. **`project.config.json` 的 `libVersion` 改成 `"3.7.9"`**、`appid` 填 `wx72e9a9e9764f0ee1`
 3. **检查 `assets/main/import/` 下文件名是否全小写**（大写会导致微信端黑屏，见 §8.2）
-
-> 更省心的做法：需要频繁在 Windows 构建时，可以由任老师补一个 PowerShell 版构建脚本（列入待办）。
 
 ---
 
@@ -194,8 +221,12 @@ mvn -pl game-room exec:java -Dexec.mainClass=com.gunzihall.room.ServerMain -Dexe
 
 ### 8.5 局域网 IP 🟡
 
-- 客户端场景里的 `serverUrl` 写死了任老师电脑的 IP，换人/换环境必须改。
+- `serverUrl` **已不再写死任老师的 IP**：**构建脚本会在构建时自动同步为本机局域网 IP**（`.sh` 用 `ipconfig getifaddr`，`.ps1` 用 `Get-NetIPAddress`）。**换人 / 换 WiFi 后重跑一次构建脚本即可**，无需手改。
+- 不想重跑整个 Cocos 构建（较慢）→ **直接改产物字符串**，效果完全等同：
+  `client/build/wechatgame/assets/main/index.js` 里的 `ws://旧IP:8080` 替换成 `ws://新IP:8080`
 - 真机试玩要求**手机和电脑同一 WiFi**；校园网 AP 隔离会连不通，需改用热点或确认互通。
+- ⚠️ **两个"已连接"别混淆**：开发者工具**右上角的绿点**是「手机 ↔ 开发者工具」的调试通道；**游戏顶栏**显示的才是「手机 ↔ 战斗服」。顶栏若显示"连接不上 ws://…"，就是**到战斗服没通** —— 依次查：战斗服起了吗（`tools/ws_probe.py --silent`）→ 地址对吗 → 同一 WiFi 吗。
+- ⚠️ **改了客户端代码看不到效果**：`Cmd+B` 只做本地编译，**真机调试的包必须重新点「真机调试」重新扫码才会重推**；保险起见先「工具 → 清除缓存」，并把手机上的小游戏**杀进程**再扫码。
 
 ### 8.6 版本一致性 🟡
 
