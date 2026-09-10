@@ -151,12 +151,14 @@ if (Test-Path -LiteralPath $pcPath) {
     $old = Get-Content -LiteralPath $pcPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $projectname = if ($old.PSObject.Properties["projectname"]) { $old.projectname } else { "gunzi-client" }
 
-    # 【关键铁律】miniprogramRoot 必须是 "./"（相对路径），绝不能空串。
-    # 空串会让开发者工具找不到源码根目录，回退成按小程序逻辑找 app.json。
+    # 【铁律】这是小游戏（compileType:game）项目，不是小程序。
+    # 千万不要写 miniprogramRoot——那是小程序专用字段，写了微信开发者工具 2.x 会误判项目类型，
+    # 把 game.json 当成 app.json 去找，从而报"在项目根目录未找到 app.json"。
+    # 另外必须保留 Cocos 自动生成的大批 setting.* / packOptions / editorSetting 等字段，
+    # 它们与 libVersion 3.17.x 兼容；暴力覆盖会导致小游戏专有功能（分包/worker/Audio）报错。
     $simplified = [ordered]@{
-        description      = "项目配置文件。"
-        miniprogramRoot  = "./"
-        setting          = [ordered]@{
+        description = "项目配置文件。"
+        setting     = [ordered]@{
             urlCheck          = $false
             postcss           = $true
             minified          = $true
@@ -164,11 +166,11 @@ if (Test-Path -LiteralPath $pcPath) {
             enhance           = $true
             useIsolateContext = $true
         }
-        compileType      = "game"
-        libVersion       = $LibVersion
-        appid            = $AppId
-        projectname      = $projectname
-        condition        = [ordered]@{
+        compileType = "game"
+        libVersion  = $LibVersion
+        appid       = $AppId
+        projectname = $projectname
+        condition   = [ordered]@{
             search       = [ordered]@{ current = -1; list = @() }
             conversation = [ordered]@{ current = -1; list = @() }
             game         = [ordered]@{ currentL = -1; list = @(); current = -1 }
@@ -176,7 +178,7 @@ if (Test-Path -LiteralPath $pcPath) {
         }
     }
     Write-Utf8NoBom -Path $pcPath -Content ($simplified | ConvertTo-Json -Depth 10)
-    Write-Ok "project.config.json: appid=$AppId libVersion=$LibVersion compileType=game miniprogramRoot=./"
+    Write-Ok "project.config.json: appid=$AppId libVersion=$LibVersion compileType=game（无 miniprogramRoot）"
 } else {
     Write-Warn "project.config.json 不存在，跳过（可能需先 GUI 构建）。"
 }
