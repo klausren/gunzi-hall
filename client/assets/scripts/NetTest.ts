@@ -1,5 +1,6 @@
 import { _decorator, Component } from 'cc';
 import { NetClient } from './net/NetClient';
+import { describeServerUrl, resolveServerUrl } from './net/ServerUrl';
 import type { SnapshotMsgDown } from './net/Protocol';
 
 const { ccclass, property } = _decorator;
@@ -19,11 +20,11 @@ const { ccclass, property } = _decorator;
 @ccclass('NetTest')
 export class NetTest extends Component {
 
-    // 【真机调试必读】手机上的 localhost 是手机自己，连不到电脑。
-    // 必须填电脑的局域网 IP，且手机与电脑连同一 WiFi。
-    // 换 WiFi 后 IP 会变 —— main.scene / TableUI.ts / NetTest.ts 三处都要改。
+    // 兜底地址：只在拿不到 location 的环境生效（微信小游戏、编辑器预览）。
+    // Web 端运行时自动探测，换 WiFi 无需再改三处（见 net/ServerUrl.ts）。
+    // 临时覆盖：页面 URL 后加 ?server=ws://host:8080/ws
     @property
-    serverUrl = 'ws://10.192.1.110:8080/ws';
+    serverUrl = 'ws://127.0.0.1:8080/ws';
 
     @property
     roomId = 1001;
@@ -34,7 +35,9 @@ export class NetTest extends Component {
     private net: NetClient | null = null;
 
     start(): void {
-        this.net = new NetClient(this.serverUrl);
+        const url = resolveServerUrl(this.serverUrl);
+        console.log(`[NetTest] 战斗服地址 ${describeServerUrl(this.serverUrl)}`);
+        this.net = new NetClient(url);
         this.net.onStateChange(online => {
             console.log(`[NetTest] ${online ? '已连接服务器' : '与服务器断开（自动重连中…）'}`);
         });
