@@ -1,5 +1,6 @@
 import { _decorator, Color, Component, Graphics, Label, Node, ResolutionPolicy, Tween, tween, UIOpacity, UITransform, Vec3, view } from 'cc';
 import { NetClient } from '../net/NetClient';
+import { describeServerUrl, resolveServerUrl } from '../net/ServerUrl';
 import type { EventMsg, JoinedMsg, SeatName, SnapshotMsgDown } from '../net/Protocol';
 import { cardFace, createCardNode, createMiniCardNode, drawCardBg, SUIT_OPTIONS } from './CardUI';
 
@@ -27,10 +28,11 @@ const { ccclass, property } = _decorator;
 @ccclass('TableUI')
 export class TableUI extends Component {
 
-    // 默认值仅作兜底，运行时以 main.scene 里挂载的 serverUrl 为准。
-    // 【真机调试必读】手机上的 localhost 是手机自己，必须填电脑的局域网 IP，
-    // 且手机与电脑连同一 WiFi。换 WiFi 后 IP 会变，两处都要改。
-    @property serverUrl = 'ws://10.192.1.110:8080/ws';
+    // 兜底地址：只在拿不到 location 的环境生效（微信小游戏、Cocos 编辑器预览）。
+    // Web 端运行时会自动探测——页面从哪台机器加载，就连哪台机器的后端，换 WiFi 无需改这里
+    // （见 net/ServerUrl.ts）。构建小游戏时 build-wechatgame.ps1 会把本机 IP 注入进来。
+    // 临时指向别的后端：页面 URL 后加 ?server=ws://host:8080/ws
+    @property serverUrl = 'ws://127.0.0.1:8080/ws';
     @property roomId = 1001;
     @property playerId = 1;
     @property mySeat: SeatName = 'NORTH';
@@ -139,7 +141,11 @@ export class TableUI extends Component {
         this.vw = fs.height > 0 ? 720 * fs.width / fs.height : 1280;
         this.tw = Math.min(1500, this.vw - 80);
         this.buildLayout();
-        this.net = new NetClient(this.serverUrl);
+        // 运行时解析地址：优先 ?server= 参数，其次从 location 自动探测，最后才用配置的兜底值。
+        // 换来换去的局域网 IP 不再需要改代码 + 重新构建。
+        const url = resolveServerUrl(this.serverUrl);
+        console.log(`[TableUI] 战斗服地址 ${describeServerUrl(this.serverUrl)}`);
+        this.net = new NetClient(url);
         this.net.onJoined(j => this.onJoinedMsg(j));
         this.net.onSnapshot(s => this.onSnapshotMsg(s));
         this.net.onEvent(e => this.onEventToast(e));
@@ -635,7 +641,7 @@ export class TableUI extends Component {
             // 【T-703 可诊断连接态】原来只显示"连接中…"，玩家完全不知道连的是谁、
             // 为什么连不上、该找谁——真人真机排查时只能干看着（"什么也做不了"）。
             // 现在把地址与可能原因直接打在顶栏，并配合"重试/新局"常驻按钮。
-            const url = this.serverUrl || '(未配置 serverUrl)';
+            const url = this.serverUrl ? describeServerUrl(this.serverUrl) : '(未配置 serverUrl)';
             this.topLabel.string = this.net?.online
                 ? `已连接 ${url} · 等待服务器数据…`
                 : `连接不上 ${url}（手机需与电脑同一 WiFi；校园网可能禁止设备互访）`;
