@@ -31,8 +31,8 @@ export class TableUI extends Component {
     // 兜底地址：只在拿不到 location 的环境生效（微信小游戏、Cocos 编辑器预览）。
     // Web 端运行时会自动探测——页面从哪台机器加载，就连哪台机器的后端，换 WiFi 无需改这里
     // （见 net/ServerUrl.ts）。构建小游戏时 build-wechatgame.ps1 会把本机 IP 注入进来。
-    // 临时指向别的后端：页面 URL 后加 ?server=ws://host:8080/ws
-    @property serverUrl = 'ws://127.0.0.1:8080/ws';
+    // 临时指向别的后端：页面 URL 后加 ?server=ws://10.192.1.110:8080/ws
+    @property serverUrl = 'ws://10.192.1.110:8080/ws';
     @property roomId = 1001;
     @property playerId = 1;
     @property mySeat: SeatName = 'NORTH';
@@ -49,6 +49,7 @@ export class TableUI extends Component {
     private selected: string[] = [];
     private vw = 1280;                              // 本机实际可见宽度（FIXED_HEIGHT 下按屏幕比例算出来）
     private tw = 1120;                              // 牌桌绒布宽度（随屏幕放宽，避免宽屏两侧露底色）
+    private lastDiagKey = '';                       // 顶栏诊断日志去重（快照很频繁，避免刷屏）
     private handBaseY = new Map<string, number>();  // 复合身份 → 该牌所在行的基础 y（两行后不能写死 0）
     private handNodes = new Map<number, Node>();
 
@@ -649,13 +650,24 @@ export class TableUI extends Component {
             return;
         }
         const phase = TableUI.PHASE_TEXT[s.phase] ?? s.phase;
-        const trump = s.trump ? `${s.trump.suit[0]}${s.trump.level}` : '未定';
-        // 诊断行（真机适配排查用）：显示实际可见区域与手牌张数。
-        // 若"视口"高度明显小于 720，说明屏幕比例导致上下内容被裁（手牌会掉出屏幕）。
+        // 主牌：用中文花色名。原先取 suit[0] 得到的是字母，显示成「主S3」，
+        // 玩家得自己反应 S=黑桃；而且 S/C 这两个字母本身就容易看混。
+        const trump = s.trump
+            ? `${TableUI.SUIT_CN[s.trump.suit] ?? s.trump.suit}${s.trump.level}`
+            : '未定';
+        // 【顶栏瘦身】原先还塞了「手牌N 视口WxH」：真机上顶栏一行已被撑满，
+        // 右侧还会被调试浮层压住。视口属于排查用的诊断信息 → 移到 Console
+        // （按 局/阶段/轮次/手牌数 去重，避免每条快照都刷屏）；手牌数玩家眼前就有。
         const vs = view.getVisibleSize();
+        const diagKey = `${s.gameNumber}|${s.phase}|${s.turn}|${(s.yourHand ?? []).length}`;
+        if (diagKey !== this.lastDiagKey) {
+            this.lastDiagKey = diagKey;
+            console.log(`[TableUI] 第${s.gameNumber}局 ${phase} 级${s.level} 主${trump} `
+                + `庄${s.banker ?? '-'} 轮${s.turn ?? '-'} 手牌${(s.yourHand ?? []).length} `
+                + `视口${Math.round(vs.width)}x${Math.round(vs.height)}`);
+        }
         this.topLabel.string =
             `第${s.gameNumber}局 ${phase} | 级${s.level} 主${trump} | 庄${s.banker ?? '-'} 轮${s.turn ?? '-'}`
-            + ` | 手牌${(s.yourHand ?? []).length} 视口${Math.round(vs.width)}x${Math.round(vs.height)}`
             + `${this.net?.online ? '' : '  ⚠ 离线'}`;
 
         // 本墩分 + 各家分（醒目色）
@@ -892,6 +904,14 @@ export class TableUI extends Component {
     private static readonly SUIT_CHAR: Record<string, string> = {
         SPADE: 'S', HEART: 'H', DIAMOND: 'D', CLUB: 'C',
     };
+    /**
+     * 服务端花色名 → 中文（顶栏主牌展示用）。
+     * 原先顶栏取 `suit[0]` 得到的是字母（显示成「主S3」），玩家得自己反应 S=黑桃；
+     * 而且字母 S / C 本身就容易混淆（与任老师反馈的 ♠♣ 难分同源）。
+     */
+    private static readonly SUIT_CN: Record<string, string> = {
+        SPADE: '黑桃', HEART: '红桃', DIAMOND: '方块', CLUB: '梅花',
+    };
     /** 副牌堆从左到右的花色顺序（主花色会被抽到主牌堆） */
     private static readonly SIDE_ORDER = ['S', 'H', 'D', 'C'];
 
@@ -1033,11 +1053,21 @@ export class TableUI extends Component {
         switch (s.phase) {
             case 'BIDDING': {
                 if (this.selected.length > 0) {
+                    // 已选牌 → 给出四个花色按钮：点哪个 = 用选中的牌亮哪个花色
                     SUIT_OPTIONS.forEach((o, i) => {
                         const x = -240 + i * 160;
                         this.makeButton(`亮${o.label}`, x, () => {
                             this.net?.sendCmd('REVEAL', { cards: this.selectedCodes(), suit: o.suit });
                         });
+                    });
+                } else {
+                    // 【引导】原先未选牌时这里完全空白，玩家找不到"选花色"的入口
+                    // （2026-09-11 任老师实际提问"我该点哪里确定要选的花色"）。
+                    // 亮主是两段式：① 选牌 → ② 才出现四个花色按钮。这里先给指引。
+                    this.makeButton('先选牌再点亮X', 0, () => {
+                        this.showToast(
+                            '① 点选手牌（用级牌亮主，如两张 3♠）→ ② 再点下方出现的「亮黑桃/亮红桃/亮方块/亮梅花」',
+                            true);
                     });
                 }
                 if (s.reveal) {
