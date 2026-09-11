@@ -68,6 +68,53 @@
                     <mainClass>${exec.mainClass}</mainClass>
                 </configuration>
             </plugin>
+            <!--
+              【部署用】打成可独立运行的 fat jar，目标环境只需 JDK 17，无需 Maven/源码：
+                  mvn -pl game-room -am package -DskipTests
+                  → game-room/target/gunzi-server.jar
+                  → java -jar gunzi-server.jar 8080 1001
+              几个必须的 transformer / filter（少一个都可能运行时炸）：
+              - ServicesResourceTransformer：合并 META-INF/services/*，Netty 靠它发现
+                编解码器与原生传输实现；不合并则只有最后一份胜出
+              - ManifestResourceTransformer：写 Main-Class，否则 java -jar 报"没有主清单属性"
+              - 排除 *.SF/*.DSA/*.RSA：依赖 jar 自带的签名文件在合并后会失效，
+                触发 "Invalid signature file digest" 直接启动失败
+              - 排除 module-info.class：多个依赖各带一份，合并即冲突报错
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <finalName>gunzi-server</finalName>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.gunzihall.room.ServerMain</mainClass>
+                                </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>module-info.class</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 </project>
