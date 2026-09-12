@@ -35,6 +35,9 @@ venv/
 *.log
 *.tmp
 runs/
+启动日志.txt
+停止日志.txt
+静态服务器日志.txt
 
 # 环境与密钥（绝不提交）
 .env

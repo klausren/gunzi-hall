@@ -1,4 +1,4 @@
-import { _decorator, Color, Component, Graphics, Label, Node, ResolutionPolicy, Tween, tween, UIOpacity, UITransform, Vec3, view } from 'cc';
+import { _decorator, Color, Component, game, Graphics, Label, Node, ResolutionPolicy, Tween, tween, UIOpacity, UITransform, Vec3, view } from 'cc';
 import { NetClient } from '../net/NetClient';
 import { describeServerUrl, resolveServerUrl } from '../net/ServerUrl';
 import type { EventMsg, JoinedMsg, SeatName, SnapshotMsgDown } from '../net/Protocol';
@@ -53,6 +53,16 @@ export class TableUI extends Component {
     private handBaseY = new Map<string, number>();  // 复合身份 → 该牌所在行的基础 y（两行后不能写死 0）
     private handNodes = new Map<number, Node>();
 
+    // 【白屏根因修复 · 重建签名】快照内容没变就一个节点都不动。
+    //
+    // 服务端**每条命令后都推全量快照**，一局下来几百条；而 renderHand() 是
+    // 「39 张牌全部拆掉重建」。即使把资源释放做对，这种量级的反复重建也是在
+    // 拿 GPU 显存做压力测试（每张牌 = 1 个 Graphics 顶点缓冲 + 若干系统字贴图）。
+    // 用签名把重建次数从「每快照一次」压到「每次手牌真的变化一次」，量级差几十倍。
+    // null = 尚未渲染过（不能用 '' 当哨兵：空手牌时签名恰好也是 ''）。
+    private handSig: string | null = null;
+    private btnSig: string | null = null;
+
     private topLabel!: Label;
     private scoreLabel!: Label;
     private toastLabel!: Label;
@@ -77,6 +87,14 @@ export class TableUI extends Component {
     private timerDeadline = 0;
     private timerKey = '';
     private static readonly TURN_SECONDS = 30;
+
+    // 【别每帧 new Color】UIRenderer.color 的 setter 是**引用比较**（this._color === value），
+    // 每帧 new 一个 Color 必然不等 → 每次都 _updateColor + markForUpdateRenderData，
+    // 顶点缓冲被反复标脏重传。倒计时每帧都在跑，是纯粹的显存/带宽浪费。
+    // 用共享常量，引用不变就真的跳过。
+    private static readonly TIMER_COLOR_NORMAL = new Color(235, 145, 25, 255);
+    private static readonly TIMER_COLOR_WARN = new Color(255, 70, 70, 255);
+    private static readonly TIMER_COLOR_OVER = new Color(200, 90, 90, 255);
 
     // 结算面板：收到 SETTLE 事件后展示 8s（服务端无 SETTLED 阶段，
     // SettleRoundCommand 直接 SETTLING→DEALING 开新局，只能事件驱动）
@@ -142,6 +160,7 @@ export class TableUI extends Component {
         this.vw = fs.height > 0 ? 720 * fs.width / fs.height : 1280;
         this.tw = Math.min(1500, this.vw - 80);
         this.buildLayout();
+        this.installContextLostGuard();
         // 运行时解析地址：优先 ?server= 参数，其次从 location 自动探测，最后才用配置的兜底值。
         // 换来换去的局域网 IP 不再需要改代码 + 重新构建。
         const url = resolveServerUrl(this.serverUrl);
@@ -188,6 +207,7 @@ export class TableUI extends Component {
 
     private onNetState(ok: boolean): void {
         this.renderTop();
+        this.renderButtons();   // 在线↔离线要换文案："新局" / "重试连接"（签名守卫，不会白重建）
         if (ok) {
             if (this.wasOnline) {
                 this.hideReconnectOverlay(); // 断线重连成功
@@ -459,6 +479,61 @@ export class TableUI extends Component {
 
     // ==================== 渲染 ====================
 
+    /**
+     * 【白屏根因修复】销毁容器下的全部子节点。
+     *
+     * `Node.removeAllChildren()` **只是解绑父子关系**（child.parent = null），
+     * 它并不销毁子节点 —— 组件的 onDestroy 不会执行，于是这些东西永远留在显存里：
+     *   · 每个 Graphics 从渲染池领走的 MeshRenderData（顶点/索引缓冲）；
+     *   · 每个 UIRenderer 的 MaterialInstance（D3D11 上是 uniform buffer）；
+     *   · useSystemFont 的 Label 各自持有的 canvas 生成的贴图。
+     * 而 handNode / btnNode 是**每个快照都要重建**的，一局 39 张手牌 × 几百条快照，
+     * 显存几分钟内就被啃光 → ANGLE 报
+     * `GL_OUT_OF_MEMORY ... ResourceManager11::allocate: Internal D3D11 error:
+     *  HRESULT: 0x8007000E: Error allocating Buffer` → 上下文丢失 → 整屏白。
+     *
+     * 正确顺序：先整体摘除（destroy() 可能是帧末延迟执行，不先摘会出现
+     * "旧节点还在树上、新节点已进来"的同帧重叠），再逐个 destroy 走完
+     * onDestroy → 把渲染资源还回池子。
+     */
+    private destroyChildren(parent: Node): void {
+        if (parent.children.length === 0) return;
+        const kids = parent.children.slice();
+        parent.removeAllChildren();
+        for (const k of kids) {
+            Tween.stopAllByTarget(k);
+            const op = k.getComponent(UIOpacity);
+            if (op) Tween.stopAllByTarget(op);
+            k.destroy();
+        }
+    }
+
+    /**
+     * 【白屏兜底】WebGL 上下文丢失（显存耗尽 / 显卡驱动重置）之后，Cocos 不会
+     * 自行重建渲染器，页面会**永久停在白屏**，玩家只能自己想到按 F5。
+     * 这里监听 canvas 的 webglcontextlost：提示并自动刷新一次 —— 刷新后
+     * NetClient 会重新 join，服务端凭 roomId+playerId 把牌局原样恢复，
+     * 是最便宜的自愈路径。用 sessionStorage 记时间戳，避免驱动故障时无限刷新。
+     */
+    private installContextLostGuard(): void {
+        const canvas = game.canvas;
+        if (!canvas) return;
+        canvas.addEventListener('webglcontextlost', (ev: Event) => {
+            ev.preventDefault();   // 不阻止的话浏览器不会再发 restored，也无法重试
+            const KEY = 'gunzi.ctxLostAt';
+            let last = 0;
+            try { last = Number(sessionStorage.getItem(KEY) ?? 0) || 0; } catch { /* 小游戏环境无 sessionStorage */ }
+            if (Date.now() - last < 30_000) {
+                // 30 秒内已经刷过一次还丢 → 不是偶发，别再刷，交给人工
+                this.showToast('显卡渲染上下文丢失，请手动按 F5 刷新', true);
+                return;
+            }
+            try { sessionStorage.setItem(KEY, String(Date.now())); } catch { /* ignore */ }
+            this.showToast('显卡渲染上下文丢失，正在自动恢复…', true);
+            setTimeout(() => { try { location.reload(); } catch { /* ignore */ } }, 1200);
+        }, false);
+    }
+
     private renderAll(): void {
         // 持续记录本局庄家：结算面板要在切庄后仍按"本局"的庄/抓分队贴标签
         const cur = this.snap;
@@ -515,13 +590,16 @@ export class TableUI extends Component {
         const left = (this.timerDeadline - Date.now()) / 1000;
         if (left > 0) {
             const sec = Math.ceil(left);
-            this.timerLabel.string = `剩 ${sec}s`;
-            this.timerLabel.color = sec <= 5
-                ? new Color(255, 70, 70, 255)
-                : new Color(235, 145, 25, 255);
+            // Label.string 内部按值比较，同一秒内重复赋值是空操作，不会重建贴图
+            const txt = `剩 ${sec}s`;
+            if (this.timerLabel.string !== txt) this.timerLabel.string = txt;
+            const c = sec <= 5 ? TableUI.TIMER_COLOR_WARN : TableUI.TIMER_COLOR_NORMAL;
+            if (this.timerLabel.color !== c) this.timerLabel.color = c;
         } else {
-            this.timerLabel.string = '已超时';
-            this.timerLabel.color = new Color(200, 90, 90, 255);
+            if (this.timerLabel.string !== '已超时') this.timerLabel.string = '已超时';
+            if (this.timerLabel.color !== TableUI.TIMER_COLOR_OVER) {
+                this.timerLabel.color = TableUI.TIMER_COLOR_OVER;
+            }
         }
     }
 
@@ -787,11 +865,15 @@ export class TableUI extends Component {
     // ==================== 手牌 ====================
 
     private renderHand(): void {
-        for (const n of this.handNodes.values()) Tween.stopAllByTarget(n);
-        this.handNode.removeAllChildren();
+        const hand = this.snap?.yourHand ?? [];
+        // 签名 = 手牌内容 + 顺序（服务端定主前后会重排，顺序变化同样要重建）。
+        // 选中态不参与签名：单击是 toggleSelect 单张改的，不需要整手重建。
+        const sig = hand.join(',');
+        if (sig === this.handSig) return;
+        this.handSig = sig;
+        this.destroyChildren(this.handNode);   // 【白屏必修】必须 destroy，不能只 removeAllChildren
         this.handNodes.clear();
         this.handBaseY.clear();
-        const hand = this.snap?.yourHand ?? [];
         const n = hand.length;
         if (n === 0) return;
 
@@ -1033,18 +1115,24 @@ export class TableUI extends Component {
     // ==================== 阶段操作按钮 ====================
 
     private renderButtons(): void {
-        // 旧按钮可能有按压动画在跑：先停 tween 再清
-        this.btnNode.children.forEach(c => Tween.stopAllByTarget(c));
-        this.btnNode.removeAllChildren();
         const s = this.snap;
+        const online = this.net?.online === true;
+        // 按钮集合签名：任何影响「按钮数量 / 文案 / 回调参数」的状态都要进签名，
+        // 否则会出现"该变的没变"。加了守卫后，快照洪流不会再反复拆建按钮区。
+        const sig = this.buttonSignature(online, s);
+        if (sig === this.btnSig) return;
+        this.btnSig = sig;
+
+        // 旧按钮可能有按压动画在跑：destroyChildren 内部会先停 tween 再销毁
+        // 【白屏必修】必须 destroy，removeAllChildren 不释放按钮的 Graphics / Label 资源
+        this.destroyChildren(this.btnNode);
 
         // 【T-703 常驻自救按钮】不能等 this.snap 到位才创建按钮：
         // 之前 `if (!s) return` 会让"还没收到第一帧/连不上"时整个按钮区空白，
         // 玩家在手机上完全无操作可做（"感觉什么也做不了"）。
         // 未连上 → "重试连接"（强制退出退避、立即重连）；已连上 → "新局"。
-        const online = this.net?.online === true;
         this.makeButton(online ? '新局' : '重试连接', 420, () => {
-            this.selected.length = 0;
+            this.resetSelection();
             if (online) { this.net?.sendCmd('NEWGAME'); } else { this.net?.reconnectNow(); }
         });
 
@@ -1093,7 +1181,7 @@ export class TableUI extends Component {
                     this.makeButton(this.selected.length > 0 ? '出牌' : '出牌：先选牌', 0, () => {
                         if (this.selected.length === 0) { this.showToast('先点选要出的牌', true); return; }
                         this.net?.sendCmd('PLAY', { cards: this.selectedCodes() });
-                        this.selected.length = 0;
+                        this.resetSelection();
                     });
                 }
                 break;
@@ -1104,7 +1192,7 @@ export class TableUI extends Component {
                     this.makeButton('进贡', 0, () => {
                         if (this.selected.length === 0) { this.showToast('先选要贡的牌', true); return; }
                         this.net?.sendCmd('TRIBUTE', { cards: this.selectedCodes(), payee: mine.receiver });
-                        this.selected.length = 0;
+                        this.resetSelection();
                     });
                 }
                 break;
@@ -1116,7 +1204,7 @@ export class TableUI extends Component {
                     this.makeButton('还贡', 0, () => {
                         if (this.selected.length === 0) { this.showToast('先选要还的牌', true); return; }
                         this.net?.sendCmd('RETURN_TRIBUTE', { cards: this.selectedCodes(), payee: payer });
-                        this.selected.length = 0;
+                        this.resetSelection();
                     });
                 }
                 break;
@@ -1124,6 +1212,52 @@ export class TableUI extends Component {
         }
 
         // 【常驻】新局按钮已上移到函数开头（不依赖 snapshot，连不上时显示"重试连接"）
+    }
+
+    /**
+     * 按钮集合签名。凡是会影响「按钮有没有 / 文案 / 回调参数」的状态，都必须进签名，
+     * 否则会出现"状态变了但按钮没变"的死按钮。
+     * 与手牌不同：按钮最多 5 个，重建成本低，但**每条快照都重建**同样是显存泄漏源，
+     * 所以同样用签名把它压到"状态真的变了才重建"。
+     */
+    private buttonSignature(online: boolean, s: SnapshotMsgDown | null): string {
+        const p: string[] = [online ? 'on' : 'off'];
+        if (!s) return p.join('|');
+        p.push(s.phase, String(s.turn ?? '-'), String(this.selected.length));
+        switch (s.phase) {
+            case 'BIDDING':
+                p.push(s.reveal ? 'reveal' : '-');          // 有亮牌才出"确认定主"
+                break;
+            case 'BURYING':
+                p.push(s.banker ?? '-');                    // 只有庄家能扣底
+                break;
+            case 'PLAYING':
+                p.push(s.turn === this.mySeat ? 'mine' : '-');
+                break;
+            case 'TRIBUTE':
+                p.push(s.pendingTributes?.[this.mySeat]?.receiver ?? '-');
+                break;
+            case 'RETURN_TRIBUTE': {
+                const payer = Object.entries(s.pendingTributes ?? {})
+                    .find(([, v]) => v.receiver === this.mySeat)?.[0];
+                p.push(payer ?? '-');                       // 还贡的收件人写进回调参数
+                break;
+            }
+            default:
+                break;
+        }
+        return p.join('|');
+    }
+
+    /**
+     * 清空选中（出牌/进贡/新局等"动作已提交或已作废"的场合）。
+     * 同时把 handSig 置空 → 下一次 renderHand 会真的重画，避免出现
+     * "selected 已空、但牌面上还留着金色选中框"的脏状态。
+     */
+    private resetSelection(): void {
+        if (this.selected.length === 0) return;
+        this.selected.length = 0;
+        this.handSig = null;
     }
 
     // ==================== 事件提示 ====================
