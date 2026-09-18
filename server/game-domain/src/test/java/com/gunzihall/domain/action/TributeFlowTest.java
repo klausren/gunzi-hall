@@ -24,51 +24,51 @@ class TributeFlowTest {
 
     private final GameRoom room = RevealTrumpCommandTest.fullRoom();
 
-    /** 构造 TRIBUTE 场景：主花色 ♥、级数 3、庄家北 → 进贡人 = 北上家（西） */
+    /** 构造 TRIBUTE 场景：主花色 ♥、级数 3、庄家北 → 进贡人 = 北上家（东，逆时针） */
     private Player prepTribute(int blood, List<Card> payerHand) {
         room.apply(new ShuffleAndDealCommand(1001L, 1L, 42L));
         room.setTrump(new TrumpContext(3, Suit.HEART));
         room.setBankerSeat(Seat.NORTH);
-        room.putTributeObligation(Seat.WEST, new TributeObligation(blood, Seat.NORTH));
-        Player west = RevealTrumpCommandTest.playerOf(room, Seat.WEST);
-        west.hand().clear();
-        west.hand().addAll(payerHand);
+        room.putTributeObligation(Seat.EAST, new TributeObligation(blood, Seat.NORTH));
+        Player east = RevealTrumpCommandTest.playerOf(room, Seat.EAST);
+        east.hand().clear();
+        east.hand().addAll(payerHand);
         // 北家（收贡人）手牌同样受控，保证还贡牌可用
         Player north = RevealTrumpCommandTest.playerOf(room, Seat.NORTH);
         north.hand().clear();
         north.hand().addAll(List.of(Card.of(Suit.HEART, 13), Card.of(Suit.CLUB, 7)));
         room.transitionTo(GamePhase.TRIBUTE);
         assertEquals(GamePhase.TRIBUTE, room.phase());
-        return west;
+        return east;
     }
 
     @Test
     void payerMustTributeBiggestNonScoreCards() {
-        // 西家手牌：大王 > 小王 > ♥A > ♠A ... K 是分牌不能贡
-        Player west = prepTribute(2, List.of(
+        // 东家手牌：大王 > 小王 > ♥A > ♠A ... K 是分牌不能贡
+        Player east = prepTribute(2, List.of(
                 Card.bigJoker(), Card.smallJoker(),
                 Card.of(Suit.SPADE, 14), Card.of(Suit.HEART, 13), Card.of(Suit.CLUB, 7)));
 
         // 交 ♠A + ♥K → K 是分牌且非级牌，拒绝
-        var r = room.apply(new TributeCommand(1001L, 4L,
+        var r = room.apply(new TributeCommand(1001L, 2L,
                 List.of(Card.of(Suit.SPADE, 14), Card.of(Suit.HEART, 13))));
         assertTrue(r.isFailure());
         assertTrue(r.reason().contains("最大"));
 
         // 交大王+小王 → 合法
-        assertTrue(room.apply(new TributeCommand(1001L, 4L,
+        assertTrue(room.apply(new TributeCommand(1001L, 2L,
                 List.of(Card.bigJoker(), Card.smallJoker()))).success());
-        assertFalse(west.hand().contains(Card.bigJoker()));
+        assertFalse(east.hand().contains(Card.bigJoker()));
 
         Player north = RevealTrumpCommandTest.playerOf(room, Seat.NORTH);
         assertTrue(north.hand().contains(Card.bigJoker()));
         assertTrue(north.hand().contains(Card.smallJoker()));
 
-        // 还贡：北还西 2 张 → 全部还清 → BURYING
-        assertTrue(room.apply(new ReturnTributeCommand(1001L, 1L, Seat.WEST,
+        // 还贡：北还东 2 张 → 全部还清 → BURYING
+        assertTrue(room.apply(new ReturnTributeCommand(1001L, 1L, Seat.EAST,
                 List.of(Card.of(Suit.HEART, 13), Card.of(Suit.CLUB, 7)))).success());
         assertEquals(GamePhase.BURYING, room.phase());
-        assertTrue(west.hand().contains(Card.of(Suit.HEART, 13)));
+        assertTrue(east.hand().contains(Card.of(Suit.HEART, 13)));
     }
 
     @Test
@@ -76,7 +76,7 @@ class TributeFlowTest {
         prepTribute(2, List.of(
                 Card.bigJoker(), Card.smallJoker(), Card.of(Suit.SPADE, 14)));
 
-        var r = room.apply(new TributeCommand(1001L, 4L, List.of(Card.bigJoker())));
+        var r = room.apply(new TributeCommand(1001L, 2L, List.of(Card.bigJoker())));
         assertTrue(r.isFailure());
         assertTrue(r.reason().contains("张数"));
     }
@@ -85,8 +85,8 @@ class TributeFlowTest {
     void wrongPayerRejected() {
         prepTribute(2, List.of(Card.bigJoker(), Card.smallJoker(), Card.of(Suit.SPADE, 14)));
 
-        // 东家想进贡（无义务）→ 拒绝
-        var r = room.apply(new TributeCommand(1001L, 2L,
+        // 西家想进贡（无义务；本局有义务的是东家）→ 拒绝
+        var r = room.apply(new TributeCommand(1001L, 4L,
                 List.of(Card.bigJoker(), Card.smallJoker())));
         assertTrue(r.isFailure());
         assertTrue(r.reason().contains("义务"));
@@ -95,11 +95,11 @@ class TributeFlowTest {
     @Test
     void returnTributeCountMustMatch() {
         prepTribute(2, List.of(Card.bigJoker(), Card.smallJoker(), Card.of(Suit.SPADE, 14)));
-        assertTrue(room.apply(new TributeCommand(1001L, 4L,
+        assertTrue(room.apply(new TributeCommand(1001L, 2L,
                 List.of(Card.bigJoker(), Card.smallJoker()))).success());
 
         Player north = RevealTrumpCommandTest.playerOf(room, Seat.NORTH);
-        var r = room.apply(new ReturnTributeCommand(1001L, 1L, Seat.WEST,
+        var r = room.apply(new ReturnTributeCommand(1001L, 1L, Seat.EAST,
                 List.of(north.hand().get(0))));
         assertTrue(r.isFailure());
         assertTrue(r.reason().contains("张数"));
@@ -128,5 +128,29 @@ class TributeFlowTest {
         room.putTributeObligation(Seat.WEST, new TributeObligation(1, Seat.NORTH));
         var r2 = room.apply(new TributeCommand(1001L, 4L, List.of(Card.of(Suit.SPADE, 5))));
         assertTrue(r2.success(), "打 5 时级牌 5 必须可进贡: " + r2.reason());
+    }
+
+    /**
+     * 进贡 / 还贡必须**留档**：谁贡给谁、贡了哪几张、还了哪几张。
+     *
+     * <p>「闲家得分」展开面板要按这两条显示明细，而义务一付清就从 pendingTributes
+     * 里摘掉了 —— 收贡人只能在 recordTribute 那一刻顺手留下，事后没法补推。
+     */
+    @Test
+    void tributeAndReturnCardsAreArchivedForPanel() {
+        prepTribute(2, List.of(Card.bigJoker(), Card.smallJoker(), Card.of(Suit.SPADE, 14)));
+
+        assertTrue(room.apply(new TributeCommand(1001L, 2L,
+                List.of(Card.bigJoker(), Card.smallJoker()))).success());
+
+        assertTrue(room.pendingTributes().isEmpty(), "交完贡，义务即摘除");
+        assertEquals(Seat.NORTH, room.tributeReceivers().get(Seat.EAST),
+                "收贡人必须留档：面板要讲清「谁贡给了谁」");
+
+        List<Card> back = List.of(Card.of(Suit.HEART, 13), Card.of(Suit.CLUB, 7));
+        assertTrue(room.apply(new ReturnTributeCommand(1001L, 1L, Seat.EAST, back)).success());
+
+        assertEquals(back, room.tributeReturnedCards().get(Seat.EAST),
+                "还贡的牌面必须留档：面板要显示还贡的是哪几张");
     }
 }

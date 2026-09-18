@@ -7,6 +7,7 @@ import com.gunzihall.domain.play.Combo;
 import com.gunzihall.domain.play.FollowValidator;
 import com.gunzihall.domain.play.Trick;
 import com.gunzihall.domain.player.Player;
+import com.gunzihall.domain.player.Seat;
 import com.gunzihall.domain.room.GameRoom;
 import com.gunzihall.domain.trump.CardComparator;
 import com.gunzihall.domain.trump.TrumpContext;
@@ -35,7 +36,7 @@ public final class BotBrain {
 
     /**
      * 决定是否亮主。返回 null = 过。
-     * <p>首局：持大王必抢（claimSuit = 手中最长花色）；
+     * <p>首局：持大王必抢（主花色不上送，由"随后摸到的第一张花色牌"决定，手册 2.2）；
      * 第二局起：三王 > 多张级牌，能反就反（canBeOverriddenBy 由命令校验）。
      */
     public static RevealDecision decideReveal(GameRoom room, Player p) {
@@ -44,7 +45,9 @@ public final class BotBrain {
             Optional<Card> bigJoker = hand.stream()
                     .filter(c -> c.isJoker() && c.joker() == Joker.BIG).findFirst();
             if (bigJoker.isPresent() && room.revealState().isEmpty()) {
-                return new RevealDecision(List.of(bigJoker.get()), longestSuit(hand));
+                // claimSuit = null：逐张发牌下亮牌那一刻还没摸到定主的那张花色牌，
+                // 服务端记"待摸定主"，摸到时自动补上。
+                return new RevealDecision(List.of(bigJoker.get()), null);
             }
             return null;
         }
@@ -155,13 +158,16 @@ public final class BotBrain {
      */
     public static List<Card> buryCards(GameRoom room, Player banker, List<Card> combined) {
         List<Card> originalBottom = room.bottomCards();
-        // 干锅判定（与 BuryBottomCommand 相同口径）
+        // 干锅判定（与 BuryBottomCommand 相同口径）——注意必须带上"首局无干锅"这条豁免：
+        // 只按"底牌无主花色普通牌"就原样扣回，首局会把含小王的底牌原样提交，撞上 Q5
+        // （扣小王必须先扣完所有大王）被命令拒绝；doBury 的兜底又是同一套原样底牌，
+        // 于是每轮失败 2 次，十几轮就把房间判成 stuck，bot 停摆、整局冻死在扣底阶段。
         TrumpContext trump = room.trump().orElseThrow();
         long trumpPlain = originalBottom.stream()
                 .filter(c -> !c.isJoker() && c.rank() != 2 && c.rank() != trump.level())
                 .filter(c -> c.suit() == trump.trumpSuit())
                 .count();
-        if (trumpPlain == 0) {
+        if (!room.isFirstRound() && trumpPlain == 0) {
             return List.copyOf(originalBottom); // 干锅：原样扣回
         }
 
@@ -188,6 +194,53 @@ public final class BotBrain {
             return 3;
         }
         return c.points() > 0 ? 2 : 0;
+    }
+
+    // ================= 他人捡牌扣王（BURYING，手册 2.3 第 5 条） =================
+
+    /**
+     * 决定本轮要不要在底牌中扣王。返回要扣进底牌的王；空列表 = 过。
+     *
+     * <p>【为什么 bot 得会这个】真人只占一个座位，另外三家都是 bot：bot 一律"过"的话，
+     * 扣王功能在实战里永远看不到，等于没做。
+     *
+     * <p>【策略：按押注胜率取舍】底牌里的王按手册 4.3 / 5.3 折算进贡血，但血的方向取决于
+     * 本局结果（保底 还是 抠底），所以扣王本质是赌本局方向：
+     * <ul>
+     *   <li><b>庄家方</b>（庄家与其对家）——庄家握有底牌优势，保底成功是大概率，
+     *       押中即多吃贡，因此有王就扣，张数取满可捡数；</li>
+     *   <li><b>抓分方</b>——必须"得分 ≥120 <b>且</b> 抠底成功"两项同时成立才吃血，胜率低，
+     *       赌输则是把王白送进底牌、反而给对方多吃贡，因此默认不押。</li>
+     * </ul>
+     *
+     * <p>另外优先扣**小王**：两种王折血只差 1 血，而大王是牌力最高的牌，留在手里打牌更值。
+     * bot 选出的牌必须能通过 {@link com.gunzihall.domain.action.PickBottomJokerCommand}
+     * 的校验（张数上限由 {@code bottomPickableCount} 卡住），与埋牌同理。
+     */
+    public static List<Card> pickBottomJokers(GameRoom room, Player p) {
+        int max = room.bottomPickableCount();
+        if (max <= 0) {
+            return List.of();
+        }
+        Seat banker = room.bankerSeat().orElse(null);
+        if (banker == null) {
+            return List.of();
+        }
+        if (p.seat() != banker && p.seat() != banker.partner()) {
+            return List.of(); // 抓分方不押注
+        }
+        List<Card> jokers = new ArrayList<>();
+        for (Card c : p.hand()) {
+            if (c.isJoker()) {
+                jokers.add(c);
+            }
+        }
+        if (jokers.isEmpty()) {
+            return List.of();
+        }
+        // 小王在前（大王留手）
+        jokers.sort(Comparator.<Card>comparingInt(c -> c.joker() == Joker.BIG ? 1 : 0));
+        return List.copyOf(jokers.subList(0, Math.min(max, jokers.size())));
     }
 
     // ================= 出牌（PLAYING，v2 抢墩策略） =================

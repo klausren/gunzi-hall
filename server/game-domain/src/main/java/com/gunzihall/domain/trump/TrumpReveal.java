@@ -48,7 +48,14 @@ public final class TrumpReveal {
         this.seat = seat;
     }
 
-    /** 第一局抢亮大王（主花色 = 亮牌人随后摸到的第一张花色牌，由调用方传入） */
+    /**
+     * 第一局抢亮大王。
+     *
+     * <p>主花色 = 亮牌人**随后摸到的第一张花色牌**（手册 2.2）。逐张发牌下，亮牌那一刻
+     * 通常还没摸到那张牌，所以这里允许 {@code suit == null} 表示"待摸定主"，
+     * 由 {@code GameRoom.settlePendingSuit} 在摸到花色牌时补上；到收口时若仍未摸到，
+     * 由 {@code GameRoom.forceResolvePendingSuit} 兜底（从底牌/手牌取第一张花色牌）。
+     */
     public static TrumpReveal firstRoundJoker(Seat seat, Suit suit) {
         return new TrumpReveal(Kind.FIRST_ROUND_JOKER, suit, 0, seat);
     }

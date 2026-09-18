@@ -25,6 +25,11 @@ import com.gunzihall.domain.trump.TrumpContext;
  * 抓分方 0 分或 300 分；底牌三王 + 保底/抠底条件；升级后越过 10 级（打完 10 出锅）。
  *
  * <p>干锅局（手册 2.3.7）：底牌王不算血、不追加升级，进贡只按分差折算。
+ *
+ * <p>接庄方向（手册 4.3 原本只写"抓分方上台坐庄"、未指明由谁接）：抓分方上台后，
+ * 新庄家 = 原庄家的<b>下家</b>（{@link Seat#next()}，出牌逆时针方向）。
+ * 连带影响"庄家方进贡给新庄家"的执行人 —— 规则是"新庄家的上家"，
+ * 于是恰好落回原庄家本人。护栏：{@code SettleRoundCommandTest}。
  */
 public final class SettleRoundCommand extends AbstractGameCommand {
 
@@ -91,7 +96,10 @@ public final class SettleRoundCommand extends AbstractGameCommand {
         }
 
         // ---- 下一局：级数/庄家/进贡义务 ----
-        Seat newBanker = result.attackerTakesBank() ? bankerSeat.previous() : bankerSeat;
+        // 抓分方上台坐庄时，由原庄家的【下家】接庄（手册 4.3；该方向曾缺失，2026-09-18 确认）。
+        // 坑：next() 是"出牌方向的下一家"（逆时针 N→W→S→E），**不等于** index+1；
+        // 若误写成 previous()（上家接庄），玩家一眼就能看出来，护栏见 SeatDirectionTest。
+        Seat newBanker = result.attackerTakesBank() ? bankerSeat.next() : bankerSeat;
 
         room.setCurrentLevel(nextLevel);
         room.setBankerSeat(newBanker);

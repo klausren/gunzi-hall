@@ -10,6 +10,7 @@ import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.util.AttributeKey;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -17,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * WebSocket 帧处理：JSON 消息路由 + 心跳 + 会话生命周期 + 令牌鉴权。
  * <p>客户端协议：
  * <pre>
- * {"op":"join","roomId":1001,"playerId":1,"seat":"NORTH"}
+ * {"op":"join","roomId":1001,"playerId":1,"seat":"SOUTH"}
  *     → {"type":"joined",...,"token":"abc123..."}（token 必须保存，后续消息必带）
  * {"op":"ping"}                                        → {"type":"pong"}
  * {"op":"snapshot","roomId":1001,"token":"abc..."}
@@ -69,8 +70,18 @@ public final class WsServerHandler extends SimpleChannelInboundHandler<TextWebSo
             send(ctx, JsonUtil.write(Map.of("type", "error", "reason", "join 需要 roomId/playerId/seat")));
             return;
         }
+        // 座位名先校验再往下走：原来直接 Seat.valueOf 抛异常，会被 exceptionCaught
+        // 静默 close 掉连接，客户端只看到"连上又断开"并在重连里空转，看不出原因。
+        Seat seat;
+        try {
+            seat = Seat.valueOf(msg.seat().trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            send(ctx, JsonUtil.write(Map.of("type", "error",
+                    "reason", "无效座位: " + msg.seat() + "（可选 NORTH/EAST/SOUTH/WEST）")));
+            return;
+        }
         ChannelSink sink = sinkOf(ctx, msg.playerId());
-        String reply = manager.join(msg.roomId(), msg.playerId(), Seat.valueOf(msg.seat()), sink);
+        String reply = manager.join(msg.roomId(), msg.playerId(), seat, sink);
         // join 回执：成功时签发会话令牌（后续 cmd/snapshot 必带）
         try {
             Map<String, Object> m = JsonUtil.read(reply, Map.class);

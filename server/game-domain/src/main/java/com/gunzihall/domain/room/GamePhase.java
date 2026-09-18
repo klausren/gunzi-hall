@@ -35,6 +35,10 @@ public enum GamePhase {
         if (target == BURYING && this == BIDDING) {
             return true;
         }
+        // 干锅局：底牌无主花色普通牌，不能替换，只能原样扣回，直接跳过 BURYING 进入 PLAYING
+        if (target == PLAYING && (this == BIDDING || this == TRIBUTE)) {
+            return true;
+        }
         return target.ordinal() == this.ordinal() + 1;
     }
 }

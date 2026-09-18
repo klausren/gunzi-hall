@@ -70,6 +70,8 @@ public final class PlayCardsCommand extends AbstractGameCommand {
         Trick trick = room.currentTrick().orElse(null);
         if (trick == null) {
             // ---- 首出：必须构成合法牌型（构造器已记录首出这一手） ----
+            // 上一圈打完时 lastCompletedTrick 还留着那四张，开新圈即清空，避免溢出到本圈
+            room.clearLastCompletedTrick();
             Optional<Combo> combo = Combo.parse(cards, trump);
             if (combo.isEmpty()) {
                 return CommandResult.fail("首出牌型不合法：只有单牌/棒子(两张同点同花)/滚子(三张同点同花)，无顺子、拖拉机、甩牌");
@@ -93,7 +95,11 @@ public final class PlayCardsCommand extends AbstractGameCommand {
         if (trick.isComplete()) {
             var winner = trick.winnerSeat();
             room.addTrickPoints(winner.team(), trick.points());
+            // 分牌明细（只留 5/10/K）：客户端「闲家得分」条展开后要按花色列出具体是哪几张牌
+            room.addTakenPointCards(winner.team(), trick.allCards());
             room.setLastTrickWinnerTeam(winner.team());
+            // 暂存已完成圈（副本），让客户端看清本轮四张出牌；currentTrick 仍照旧清空
+            room.setLastCompletedTrick(new Trick(trick.leader(), trick.lead(), trump, trick.plays()));
             room.clearCurrentTrick();
             room.setTurnSeat(winner);
             if (room.allHandsEmpty()) {

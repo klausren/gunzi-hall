@@ -111,14 +111,18 @@ public final class ResolveTrumpFromBottomCommand extends AbstractGameCommand {
         return advance(room);
     }
 
-    /** 定主完成后推进：有进贡义务 → TRIBUTE，否则 → BURYING */
+    /** 定主完成后推进：有进贡义务 → TRIBUTE，否则 → 扣底阶段（干锅由 enterBuryingPhase 拦成 PLAYING） */
     private CommandResult advance(GameRoom room) {
-        if (room.pendingTributes().isEmpty()) {
-            room.transitionTo(GamePhase.BURYING);
-        } else {
+        if (!room.pendingTributes().isEmpty()) {
             room.transitionTo(GamePhase.TRIBUTE);
+            return CommandResult.ok();
         }
-        return CommandResult.ok();
+        // 【第三条进入扣底的路径】非首局抽底牌定主：这里过去直接 transitionTo(BURYING)，
+        // 漏了干锅判定 —— 干锅局照样进扣底，庄家点"扣底"被规则拒绝、bot 反复失败把房间
+        // 判成 stuck，整局冻死在扣底阶段。现在统一走 enterBuryingPhase()。
+        return room.enterBuryingPhase()
+                ? new CommandResult(true, "干锅，底牌原样扣回")
+                : CommandResult.ok();
     }
 
     /** 无主牌上下文时的原始牌力比较：王 > 花色牌；花色牌先点数后花色兜底序 */
