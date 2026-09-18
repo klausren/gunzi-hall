@@ -27,6 +27,8 @@ class BuryBottomCommandTest {
         room.apply(new ShuffleAndDealCommand(1001L, 1L, 42L));
         room.setTrump(new TrumpContext(3, Suit.HEART));
         room.setBankerSeat(Seat.NORTH);
+        // 干锅只判定第二局及以后；测试用例统一模拟非首局。
+        room.setFirstRound(false);
         room.setBottomCards(bottom);
         Player banker = RevealTrumpCommandTest.playerOf(room, Seat.NORTH);
         banker.hand().clear();
@@ -111,7 +113,13 @@ class BuryBottomCommandTest {
                 Card.of(Suit.HEART, 7), Card.of(Suit.HEART, 9), Card.of(Suit.CLUB, 4));
         assertTrue(room.apply(new BuryBottomCommand(1001L, 1L, good)).success());
         assertFalse(room.isDryPot());
-        assertEquals(GamePhase.PLAYING, room.phase());
+        // 扣了王 → 本局底牌对所有人公开（手册 2.3.3）。
+        // 另外，扣完底后只要别家手里还有王，本局还要依次问他们要不要跟着扣（2.3.5），
+        // 此时阶段会停在 BURYING 而不是直接开打 —— 本用例只关心 Q5 校验是否放行，
+        // 这两种落点都算成功；窗口本身的时序由 PickBottomJokerCommandTest 覆盖。
+        assertTrue(room.isBottomRevealed(), "扣王必须公开底牌（手册 2.3.3）");
+        assertTrue(room.phase() == GamePhase.PLAYING || room.phase() == GamePhase.BURYING,
+                "扣底成功后要么开打、要么留在扣王窗口，实际: " + room.phase());
     }
 
     @Test

@@ -19,8 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>第一局（级数 3）：北家抢亮大王定主 ♥ → 扣底 → 受控手牌打两圈 → 结算
  * （庄家方保底、抓分方 10 分 → 庄家方升级 3→4，抓分方 7 血进贡）。
- * <p>第二局（级数 4）：发牌 → 东家亮 2 张 ♠4 定主 ♠ → 西家（庄家上家）进贡 7 张
- * 最大非分牌 → 北家还贡 → 扣底 → 打一圈 → 结算（B 队抠底 30 分，未过线庄家留任）。
+ * <p>第二局（级数 4）：发牌 → 东家亮 2 张 ♠4 定主 ♠ → 东家（庄家北的上家，出牌逆时针）
+ * 进贡 7 张最大非分牌 → 北家还贡 → 扣底 → 打一圈 → 结算（B 队抠底 30 分，未过线庄家留任）。
  *
  * <p>注意受控手牌避免使用级数牌（第一局 3、第二局 4）以外的坑：级牌 tier 高于主花色普通牌，
  * 赢圈判定会反转。
@@ -68,18 +68,18 @@ class FullGameFlowTest {
         assertEquals(GamePhase.PLAYING, room.phase());
         assertEquals(Seat.NORTH, room.turnSeat().orElseThrow());
 
-        // ---- 第 1 圈：北 ♥6 首出，东 ♥7 压（都是主），南西垫分牌 ----
+        // ---- 第 1 圈（逆时针：北 → 西 → 南 → 东）：北 ♥6 首出，西/南垫分牌，东 ♥7 主压 ----
         play(Seat.NORTH, Card.of(Suit.HEART, 6));
-        play(Seat.EAST, Card.of(Suit.HEART, 7));
-        play(Seat.SOUTH, Card.of(Suit.CLUB, 5));
         play(Seat.WEST, Card.of(Suit.DIAMOND, 5));
+        play(Seat.SOUTH, Card.of(Suit.CLUB, 5));
+        play(Seat.EAST, Card.of(Suit.HEART, 7));
         assertEquals(Seat.EAST, room.turnSeat().orElseThrow(), "♥7 赢 → 东领出下一圈");
 
-        // ---- 第 2 圈：东 ♣9 首出，南 ♣8 跟，西垫 ♦9，北 ♥4 主杀 ----
+        // ---- 第 2 圈（东领出，逆时针：东 → 北 → 西 → 南）：东 ♣9 首出，北 ♥4 主杀，西垫 ♦9，南 ♣8 跟 ----
         play(Seat.EAST, Card.of(Suit.CLUB, 9));
-        play(Seat.SOUTH, Card.of(Suit.CLUB, 8));
-        play(Seat.WEST, Card.of(Suit.DIAMOND, 9));
         play(Seat.NORTH, Card.of(Suit.HEART, 4));
+        play(Seat.WEST, Card.of(Suit.DIAMOND, 9));
+        play(Seat.SOUTH, Card.of(Suit.CLUB, 8));
         assertEquals(GamePhase.SETTLING, room.phase(), "手牌打空 → 结算；北（A 队）赢最后一圈 = 保底");
 
         // ---- 结算：B 队 10 分（♣5+♦5）< 80 → 庄家方升级，B 队进贡 ceil(70/10)=7 血 ----
@@ -96,8 +96,8 @@ class FullGameFlowTest {
         assertTrue(room.apply(new ShuffleAndDealCommand(1001L, 1L, 99L)).success());
         assertEquals(GamePhase.BIDDING, room.phase());
 
-        // 西家进贡义务：7 血（分差），收贡人 = 庄家北
-        var ob = room.pendingTributes().get(Seat.WEST);
+        // 东家进贡义务：7 血（分差），收贡人 = 庄家北（执行人 = 庄家上家 = 东）
+        var ob = room.pendingTributes().get(Seat.EAST);
         assertEquals(7, ob.bloodCount());
         assertEquals(Seat.NORTH, ob.receiver());
 
@@ -113,18 +113,18 @@ class FullGameFlowTest {
         assertTrue(room.apply(new ConfirmTrumpCommand(1001L, pid(Seat.SOUTH))).success());
         assertEquals(GamePhase.TRIBUTE, room.phase());
 
-        // 西家受控手牌：最大非分牌 7 张（K 是分牌不贡；5 分牌不贡）
+        // 东家受控手牌：最大非分牌 7 张（K 是分牌不贡；5 分牌不贡）
         var tributeCards = List.of(Card.bigJoker(), Card.smallJoker(),
                 Card.of(Suit.SPADE, 14), Card.of(Suit.HEART, 14),
                 Card.of(Suit.CLUB, 14), Card.of(Suit.DIAMOND, 14), Card.of(Suit.CLUB, 7));
-        setHand(Seat.WEST, tributeCards.toArray(new Card[0]));
-        at(Seat.WEST).hand().add(Card.of(Suit.HEART, 5)); // 分牌留在手里
-        assertTrue(room.apply(new TributeCommand(1001L, pid(Seat.WEST), tributeCards)).success(),
+        setHand(Seat.EAST, tributeCards.toArray(new Card[0]));
+        at(Seat.EAST).hand().add(Card.of(Suit.HEART, 5)); // 分牌留在手里
+        assertTrue(room.apply(new TributeCommand(1001L, pid(Seat.EAST), tributeCards)).success(),
                 "交 7 张最大非分牌");
 
         // 北家还贡（把收到的贡牌原样还回）
         assertTrue(room.apply(new ReturnTributeCommand(1001L, pid(Seat.NORTH),
-                Seat.WEST, tributeCards)).success());
+                Seat.EAST, tributeCards)).success());
         assertEquals(GamePhase.BURYING, room.phase());
 
         // 庄家扣底（♠7/♠9 保证非干锅；底牌分值 = ♣5 + ♣10 = 15）
@@ -136,15 +136,16 @@ class FullGameFlowTest {
         assertEquals(GamePhase.PLAYING, room.phase());
         assertEquals(2, room.gameNumber(), "局数推进");
 
-        // 第二局打一圈（每家 1 张）：北 ♠6 首出，东 ♠8 压，南西垫 → 东（B 队）赢 = 抠底
+        // 第二局打一圈（每家 1 张，逆时针：北 → 西 → 南 → 东）：
+        // 北 ♠6 首出，西 ♥8、南 ♣6 垫副牌，东 ♠8 跟主且最大 → 东（B 队）赢 = 抠底
         setHand(Seat.NORTH, Card.of(Suit.SPADE, 6));
         setHand(Seat.EAST, Card.of(Suit.SPADE, 8));
         setHand(Seat.SOUTH, Card.of(Suit.CLUB, 6));
         setHand(Seat.WEST, Card.of(Suit.HEART, 8));
         play(Seat.NORTH, Card.of(Suit.SPADE, 6));
-        play(Seat.EAST, Card.of(Suit.SPADE, 8));
-        play(Seat.SOUTH, Card.of(Suit.CLUB, 6));
         play(Seat.WEST, Card.of(Suit.HEART, 8));
+        play(Seat.SOUTH, Card.of(Suit.CLUB, 6));
+        play(Seat.EAST, Card.of(Suit.SPADE, 8));
         assertEquals(GamePhase.SETTLING, room.phase());
 
         assertTrue(room.apply(new SettleRoundCommand(1001L, pid(Seat.SOUTH))).success());

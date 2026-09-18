@@ -118,7 +118,11 @@ mvn -pl game-room exec:java -Dexec.mainClass=com.gunzihall.room.ServerMain -Dexe
 
 > 控制台出现 bot 自动开局 / 出牌日志即成功。战斗服监听 `ws://localhost:8080/ws`。
 
-> ⚠️ **一个房间目前只支持 1 个真人**：`ServerMain` 用 `manager.create(roomId, Set.of(Seat.EAST, Seat.SOUTH, Seat.WEST))` 把三个座位交给 bot，**只有 NORTH 留给真人**。所以**两个人不要同时连同一个战斗服**（会抢 NORTH 座位、互相把对方踢下线）。**各自在自己电脑上跑各自的战斗服即可，互不影响**。
+> ⚠️ **一个房间目前只支持 1 个真人**：`ServerMain` 把**除 `SOUTH` 以外的三个座位**交给 bot，**只有 SOUTH 留给真人**（`SOUTH` 是 `ServerMain.DEFAULT_HUMAN_SEAT`，可用启动参数覆盖：`-Dexec.args="8080 1001 WEST"`）。所以**两个人不要同时连同一个战斗服**（会抢 SOUTH 座位、互相把对方踢下线）。**各自在自己电脑上跑各自的战斗服即可，互不影响**。
+>
+> 为什么真人座必须是 `SOUTH`：客户端把"我"永远画在屏幕最下方，而座位名是罗盘绝对方位（上北下南），玩家坐南边面朝北看牌 → **我在下 = 我在南**。客户端座位写在 `client/assets/scripts/ui/TableUI.ts` 的 `mySeat`（默认 `'SOUTH'`，可用页面 `?seat=` 临时覆盖）。**两端座位名必须一致**，否则真人会停在"座位已被占用"、牌桌永远等不到数据（这个坑已经踩过一次）。
+>
+> ⚠️ **出牌方向是逆时针**（手册 3.2「每轮（每圈）由庄家先出牌，逆时针」）：`Seat.next()` 是 `(index + 3) % 4`，**不是** `index + 1`。座位枚举 N→E→S→W 只是"按罗盘顺时针编号"（为了对齐发牌结果下标），而出牌是逆时针，**两者方向本来就相反** —— 写成 `index + 1` 会让整局出牌变成顺时针，并且连带把上家/下家整体对调（进贡规则是"庄家的上家向庄家进贡"，于是贡牌进给错的人）。真人坐 SOUTH 时**下家在右手边（东）**，与真实牌桌一致。护栏测试 `SeatDirectionTest`（动 `Seat.java` 之前先读它）。客户端的槽位表只负责"谁坐哪个方位"，出牌轮转完全由服务端 `turn` 字段驱动，**不要按出牌方向去"纠正"槽位表**。
 >
 > 验证服务端是否正常（零依赖探针，任选其一）：
 > ```powershell
@@ -144,6 +148,31 @@ mvn -pl game-room exec:java -Dexec.mainClass=com.gunzihall.room.ServerMain -Dexe
 >
 > 验证服务端是否正常：`env no_proxy='*' python3 tools/ws_probe.py --silent`（零依赖，见 `tools/ws_probe.py`）
 > ⚠️ 真机连不上时先分清两种"已连接"：**开发者工具右上角的绿点**是「手机↔开发者工具」的调试通道，**不等同于**「手机↔战斗服」通了；以**游戏顶栏**显示的状态为准。
+
+### 6.1 改完客户端 .ts，先自测再重新构建（2026-09-17 新增）
+
+Cocos 工程没有测试框架，**改完 `client/assets/scripts/` 下的 .ts 后请先跑这两条**，
+比"重新构建 → 刷新 → 打到那个场景才发现"快一个数量级：
+
+```bash
+cd D:/workbuddy/projects/gunzi-hall
+
+# ① UI 状态逻辑回归（把 TableUI.ts 直接转译到 Node 里跑，不启编辑器、不建场景）
+NODE_PATH="C:/Users/icymoon/.workbuddy/binaries/node/workspace/node_modules" \
+  "C:/Users/icymoon/.workbuddy/binaries/node/versions/22.22.2-3/node.exe" tools/ui_smoke_test.js
+
+# ② 类型检查（用 Cocos 自己生成的 tsconfig，别自己写）
+"C:/Users/icymoon/.workbuddy/binaries/node/versions/22.22.2-3/node.exe" \
+  "D:/workbuddy/node_modules/typescript/lib/tsc.js" -p client/temp/tsconfig.check.json
+```
+
+两条都必须 **0 失败 / 0 errors**，再走 §5 的重新构建 + Ctrl+F5。
+
+> `tools/ui_smoke_test.js` 目前覆盖三块：**提示（toast）生命周期**（踩过真 bug：
+> 出牌失败的红字因为"后来没有事件覆盖它"而跨局残留）、**铭牌标记**（第一局不画定主瓦片）
+> 与**底牌展示区**（扣底阶段公开原 6 张、扣完收起、干锅局全程可见）。
+> 往里面加断言比手测划算：新增 UI 状态逻辑（选中态、遮罩、常驻标记…）时，
+> **顺手把"该出现的时候出不出现 / 该消失的时候会不会消失"也断言上**。
 
 ---
 

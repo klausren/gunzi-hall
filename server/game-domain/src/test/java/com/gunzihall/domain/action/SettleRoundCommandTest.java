@@ -59,10 +59,11 @@ class SettleRoundCommandTest {
         assertTrue(s.bankerPromoted(), "<120 且保底 → 庄家方升级");
         assertFalse(s.attackerTakesBank());
 
-        // 升级：3 → 4；庄家不变（北）；抓分方进贡 4 血给北家，执行人 = 北上家（西）
+        // 升级：3 → 4；庄家不变（北）；抓分方进贡 4 血给北家，执行人 = 北上家（东）
+        // （出牌逆时针，上家 = 东；见 SeatDirectionTest）
         assertEquals(4, room.currentLevel());
         assertEquals(Seat.NORTH, room.bankerSeat().orElseThrow());
-        var ob = room.pendingTributes().get(Seat.WEST);
+        var ob = room.pendingTributes().get(Seat.EAST);
         assertEquals(4, ob.bloodCount());
         assertEquals(Seat.NORTH, ob.receiver());
         assertEquals(GamePhase.DEALING, room.phase(), "未出锅 → 直接开新局");
@@ -85,15 +86,16 @@ class SettleRoundCommandTest {
         assertFalse(s.attackerPromoted(), "保底局抓分方没抠底 → 不升级");
         assertEquals(120, s.attackerScore());
 
-        // 新庄家 = 原庄家（北）上家 = 西（B 队）；无人升级（抓分方没抠底、庄家方没保住 120 线以下）
-        assertEquals(Seat.WEST, room.bankerSeat().orElseThrow());
+        // 新庄家 = 原庄家（北）上家 = 东（B 队）；无人升级（抓分方没抠底、庄家方没保住 120 线以下）
+        assertEquals(Seat.EAST, room.bankerSeat().orElseThrow());
         assertEquals(3, room.currentLevel(), "双方都不满足升级条件，级数不变");
 
         // 庄家方进贡：扣王血 = 3 小王 × 1 = 3 血（分差 120 在 80..150 无分差血）
-        // 执行人 = 新庄家（西）上家 = 南（原庄家搭档），收贡 = 西
+        // 执行人 = 新庄家（东）上家 = 南（原庄家搭档），收贡 = 东
+        // （previous∘previous = 对家，所以"新庄家的上家"恒为原庄家的搭档，与方向无关）
         var ob = room.pendingTributes().get(Seat.SOUTH);
         assertEquals(3, ob.bloodCount());
-        assertEquals(Seat.WEST, ob.receiver());
+        assertEquals(Seat.EAST, ob.receiver());
     }
 
     @Test
@@ -108,9 +110,9 @@ class SettleRoundCommandTest {
         assertTrue(room.apply(new SettleRoundCommand(1001L, 1L)).success());
 
         // 200 分含底牌 20×2=40 → 出牌阶段抓分 160；上台；无抠底升级？有：dug=true 且 ≥120 → 升级
-        var ob = room.pendingTributes().get(Seat.SOUTH); // 新庄家西的上家 = 南
+        var ob = room.pendingTributes().get(Seat.SOUTH); // 新庄家东的上家 = 南
         assertEquals(5, ob.bloodCount(), "(200-150)/10 = 5 血");
-        assertEquals(Seat.WEST, ob.receiver());
+        assertEquals(Seat.EAST, ob.receiver());
     }
 
     @Test
@@ -155,7 +157,8 @@ class SettleRoundCommandTest {
         assertTrue(room.apply(new SettleRoundCommand(1001L, 1L)).success());
 
         // 分差血 (80-40)/10 = 4；王血因干锅作废
-        var ob = room.pendingTributes().get(Seat.WEST);
+        // 执行人 = 庄家北的上家 = 东
+        var ob = room.pendingTributes().get(Seat.EAST);
         assertEquals(4, ob.bloodCount());
     }
 }

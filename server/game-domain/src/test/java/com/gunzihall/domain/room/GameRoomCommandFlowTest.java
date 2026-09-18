@@ -33,8 +33,10 @@ class GameRoomCommandFlowTest {
     void seatPartnerAndTeam() {
         assertEquals(Seat.SOUTH, Seat.NORTH.partner());
         assertEquals(Seat.WEST, Seat.EAST.partner());
-        assertEquals(Seat.EAST, Seat.NORTH.next());
-        assertEquals(Seat.WEST, Seat.NORTH.previous());
+        // 出牌逆时针（手册 3.2）：北 → 西 → 南 → 东。
+        // 注意这不是"编号顺序"（编号按罗盘顺时针 N→E→S→W），详见 SeatDirectionTest。
+        assertEquals(Seat.WEST, Seat.NORTH.next());
+        assertEquals(Seat.EAST, Seat.NORTH.previous());
         assertSame(Seat.NORTH.team(), Seat.SOUTH.team());
         assertNotSame(Seat.NORTH.team(), Seat.EAST.team());
     }

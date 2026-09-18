@@ -8,7 +8,7 @@
 服务端 OK → 问题在网络或客户端；服务端不通 → 先修服务端。
 
 用法：
-    env no_proxy='*' python3 tools/ws_probe.py                    # 自动探测本机 IP + 发 join
+    env no_proxy='*' python3 tools/ws_probe.py                    # 自动探测本机 IP + 发 join（默认坐 SOUTH=真人位）
     env no_proxy='*' python3 tools/ws_probe.py --op NEWGAME       # 额外发一条命令
     env no_proxy='*' python3 tools/ws_probe.py --host 10.0.0.5 --player 2 --seat EAST
     env no_proxy='*' python3 tools/ws_probe.py --silent           # 只看握手成败（端口连通性检查）
@@ -114,7 +114,9 @@ def main() -> int:
     ap.add_argument("--path", default="/ws")
     ap.add_argument("--room", type=int, default=1001)
     ap.add_argument("--player", type=int, default=1)
-    ap.add_argument("--seat", default="NORTH")
+    ap.add_argument("--seat", default="SOUTH",
+                    help="座位名，默认 SOUTH（真人在南家：服务端只把 SOUTH 留给真人，"
+                         "其余 NORTH/EAST/WEST 都是 bot，占用时会报「座位已被占用」）")
     ap.add_argument("--op", default=None, help="join 之后再发一条命令，如 NEWGAME")
     ap.add_argument("--count", type=int, default=5, help="最多打印几条消息")
     ap.add_argument("--silent", action="store_true", help="只检查连通性，不 join")
