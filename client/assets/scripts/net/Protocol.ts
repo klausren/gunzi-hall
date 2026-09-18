@@ -39,6 +39,7 @@ export type CmdType =
     | 'TRIBUTE'         // 进贡
     | 'RETURN_TRIBUTE'  // 还贡
     | 'BURY'            // 扣底
+    | 'PICK_JOKER'      // 他人捡牌扣王（手册 2.3.5；cards 为空 = 本轮不扣、让给下一家）
     | 'PLAY'            // 出牌
     | 'SETTLE'          // 结算（服务端驱动）
     | 'NEWGAME';        // 新局（重开发牌，客户端"新局"按钮触发）
@@ -71,9 +72,23 @@ export interface SnapshotMsgDown {
     roomId: number;
     phase: string;          // WAITING/DEALING/BIDDING/BURYING/PLAYING/SETTLED...
     gameNumber: number;
+    /** 是否本轮第一局：第一局抢亮 1 张大王（1 张即可、无人能反），第二局起亮/反级牌 */
+    firstRound?: boolean;
     level: number;                          // 当前级数（3~10）
     trump?: { level: number; suit: string }; // 定主信息
-    reveal?: { kind: string; suit: string; seat: SeatName }; // 亮王/反主状态
+    /**
+     * 亮王/反主状态。
+     * kind：FIRST_ROUND_JOKER（第一局抢亮大王）/ FIXED_BY_BOTTOM（无人亮时底牌定主）
+     *      / LEVEL_CARDS（级牌）/ TRIPLE_SMALL_JOKER（3 小王）/ TRIPLE_BIG_JOKER（3 大王）
+     * count：级牌张数（1..3，仅 LEVEL_CARDS 有意义，其余为 0）——"2 张反 1 张、
+     *      3 张反 2 张或 1 张"要靠它判定，客户端据此决定图标是"可亮"还是"可反"。
+     */
+    /**
+     * 亮主/反主声明。
+     * suit：第一局"已亮大王、主花色待摸"时服务端**不下发**该字段——主花色由亮牌人
+     * 随后摸到的第一张花色牌决定（手册 2.2），摸到之前它还没有值。
+     */
+    reveal?: { kind: string; suit?: string; count?: number; seat: SeatName };
     banker?: SeatName | null;               // 庄家座位
     turn?: SeatName | null;                 // 当前轮到谁出牌/行动
     followRule: string;                     // 跟牌规则（STRICT/ALIVE...）
@@ -83,10 +98,62 @@ export interface SnapshotMsgDown {
         leader: SeatName;                   // 首出者
         leadCards: string[];                // 首出牌
         plays: { seat: SeatName; cards: string[] }[]; // 跟牌记录
+        /** 一圈凑齐 4 手时才有：赢家座位（客户端收墩动画收向它） */
+        winner?: SeatName;
     };
-    trickPoints?: Record<string, number>;   // 各队已捡分
+    trickPoints?: Record<string, number>;   // 各队已捡分（key = 队伍代号 A/B，仅供取数不进界面）
+    /**
+     * 各队已收走的**分牌明细**（team → 牌编码列表，只含 5/10/K）。
+     * "闲家得分"条展开后要按花色列出"这些分具体是哪几张牌"，客户端只能由服务端下发。
+     */
+    takenPointCards?: Record<string, string[]>;
     pendingTributes?: Record<string, { blood: number; receiver: string }>; // 待进贡
     settlement?: SettlementMsg;             // 上一局结算（SETTLED 阶段读取）
+    dryPot?: boolean;                        // 本局是否干锅（底牌无主花色普通牌）
+    /**
+     * 公开的底牌（6 张原底牌，牌面编码）。
+     *
+     * <p>只在三种情况下发，均由服务端按规则判定（手册 2.3.1 / 2.3.3 / 2.3.5 / 2.3.7）：
+     * <ul>
+     *   <li>扣底阶段（BURYING）：庄家刚收底、还没扣回，这 6 张就是原底牌，公开；</li>
+     *   <li>干锅局（dryPot）：底牌不能替换、原样扣回，且干锅整段跳过扣底阶段，
+     *       出牌全程仍然公开；</li>
+     *   <li>扣王之后（bottomRevealed）：庄家扣了王，或有人在他人的扣王窗口里扣了王 ——
+     *       手册 2.3.3 / 2.3.5 都要求"扣王时底牌必须亮给所有人看"。扣王窗口期间也会
+     *       临时下发（不看到牌面就无从判断值不值得押）。</li>
+     * </ul>
+     * 其余时间（正常局出牌起、且没人扣王）**不会出现该字段** —— 庄家扣回去的 6 张是机密
+     * （手册 2.3.3「不扣王时底牌不公开」），客户端据此把它从桌上收起。</li>
+     */
+    bottom?: string[];
+    /**
+     * **庄家私有**的底牌（扣完底之后）—— 只发给庄家本人，其余三家拿不到该字段。
+     *
+     * <p>扣底成功后 `bottom` 就不再下发了（那 6 张原底牌被庄家换成新的 6 张，属机密，
+     * 手册 2.3.3），可庄家自己必须能回看"我到底扣了哪 6 张"：否则扣底决策等于开盲盒。
+     * 因此服务端按玩家定制快照，只对庄家下发这一份（见 RoomActor 的私有区）。
+     *
+     * <p>与 `bottom` 的分工：`bottom` = 公开的 6 张原底牌（扣底阶段 / 干锅局全程），
+     * 谁来都能看；`myBottom` = 我自己扣下的 6 张（扣底后长期有效）。两者同时存在时
+     * 客户端按**公开优先**渲染，不会重复摆两块底牌。
+     */
+    myBottom?: string[];
+    /**
+     * 底牌是否处于"已公开"状态（手册 2.3.3 庄家扣王 / 2.3.5 他人扣王）。
+     * 与 `bottom` 是否下发**不是同一件事**：`bottom` 决定画不画那 6 张，
+     * 本字段只影响底牌区的说明文案（"扣完收起" 还是 "扣王了、本局公开"）。
+     */
+    bottomRevealed?: boolean;
+    /**
+     * 他人捡牌扣王窗口（手册 2.3.5）：当前轮到哪一家表态。没有窗口时**不出现**该字段。
+     *
+     * <p>等于自己的座位时，客户端给出「扣王 / 跳过」两个按钮。窗口的准入条件
+     * （干锅禁扣、庄家底牌含分牌禁扣、有没有王可扣）全部由服务端判定，
+     * 客户端只认字段 —— 不在这里复算规则。
+     */
+    pickSeat?: SeatName;
+    /** 本次最多能扣几张王（= 底牌里可捡的非分牌张数）；只在 pickSeat 出现时下发 */
+    pickMax?: number;
     [k: string]: unknown;
 }
 

@@ -144,6 +144,56 @@ function addSuitGraphic(parent: Node, suitKey: string,
 }
 
 /**
+ * 花色矢量绘制的对外入口。
+ * 顶栏"主牌+级数"图标、定主标记、庄家标记都要画花色，统一走这里，
+ * 保证与牌面 / 亮主栏的花色形状、配色完全一致（♠ 深蓝 / ♣ 黑 / ♥♦ 红）。
+ */
+export function addSuitIcon(parent: Node, suitKey: string,
+                            cx: number, cy: number, size: number, color: Color): void {
+    addSuitGraphic(parent, suitKey, cx, cy, size, color);
+}
+
+/**
+ * 浅色圆角"瓦片"底（项目无图片资源，图标一律代码画）。
+ *
+ * <p>用途：庄家"庄"标记 / 级数标记 / 定主者花色标记 —— 都是同一套小方块，
+ * 只是内容不同，所以把"底"抽出来复用，避免每处各画一遍圆角矩形。
+ */
+export function createTileNode(w: number, h: number, bg: Color, border: Color,
+                               radius = 5): Node {
+    const n = new Node('tile');
+    n.layer = 1 << 25;
+    n.addComponent(UITransform).setContentSize(w, h);
+    const g = n.addComponent(Graphics);
+    g.roundRect(-w / 2, -h / 2, w, h, radius);
+    g.fillColor = bg;
+    g.fill();
+    g.lineWidth = 1;
+    g.strokeColor = border;
+    g.stroke();
+    return n;
+}
+
+/** 瓦片内的文字（一个节点只能挂一个 UIRenderer，Label 必须拆到子节点） */
+export function addTileText(parent: Node, text: string, x: number, y: number,
+                            fontSize: number, color: Color, boxW: number): void {
+    const n = new Node('t');
+    n.layer = 1 << 25;
+    n.addComponent(UITransform).setContentSize(boxW, fontSize + 6);
+    const l = n.addComponent(Label);
+    l.string = text;
+    l.fontSize = fontSize;
+    l.lineHeight = fontSize + 3;
+    l.color = color;
+    l.isBold = true;
+    l.useSystemFont = true;     // 系统字体：Bitmap font 中文字形不可靠（如"庄"）
+    l.horizontalAlign = Label.HorizontalAlign.CENTER;
+    l.verticalAlign = Label.VerticalAlign.CENTER;
+    n.setPosition(x, y, 0);
+    parent.addChild(n);
+}
+
+/**
  * 花色选择按钮用的中文描述。
  *
  * 【为什么用汉字而不是 ♠♥♦♣ 符号】任老师 2026-09-10 反馈"草花黑桃图标太相近"。
@@ -159,7 +209,8 @@ export const SUIT_OPTIONS: { suit: string; label: string }[] = [
 
 /**
  * 创建一张牌的可视节点。
- * node.userData = { code } 供外部取回。
+ * 额外挂一个 `userData.code`（运行时属性，Node 未声明此字段，故用断言写入）：
+ * 目前没有代码依赖它，留着是为了在浏览器控制台翻节点时能直接认出是哪张牌。
  */
 export function createCardNode(code: string): Node {
     const node = new Node(`card_${code}`);
@@ -186,7 +237,9 @@ export function createCardNode(code: string): Node {
         if (suit) addSuitGraphic(node, code[0], 0, -15, 22, color);
     }
 
-    node.userData = { code };
+    // Node 的 .d.ts 没有 userData 字段（引擎运行时可以随便挂），
+    // 直接赋值会让 tsc 报 TS2339，一直污染类型检查结果 → 显式断言写入。
+    (node as unknown as { userData: { code: string } }).userData = { code };
     return node;
 }
 
