@@ -23,11 +23,20 @@ public final class ConfirmTrumpCommand extends AbstractGameCommand {
         if (room.revealState().isEmpty()) {
             return CommandResult.fail("尚无人亮主，无法确认（无人亮主请走底牌定主流程，手册 2.2）");
         }
+        // 第一局亮大王后若始终没摸到花色牌（例如牌发完才点大王）→ 兜底定主。
+        // 少了这一步，主花色会一直悬空，扣底/出牌阶段拿不到主牌上下文。
+        if (room.pendingFirstRoundSuit() && !room.forceResolvePendingSuit()) {
+            return CommandResult.fail("主花色未定，无法确认（手册 2.2）");
+        }
         if (room.bankerSeat().isEmpty()) {
             return CommandResult.fail("庄家未定，无法确认");
         }
         if (room.pendingTributes().isEmpty()) {
-            room.transitionTo(GamePhase.BURYING);
+            // 干锅局由 enterBuryingPhase() 统一拦下（原样扣回 → 直接 PLAYING），
+            // 这里只需要把"干锅"这个原因透给客户端，让玩家知道为什么没进扣底。
+            if (room.enterBuryingPhase()) {
+                return new CommandResult(true, "干锅，底牌原样扣回");
+            }
         } else {
             room.transitionTo(GamePhase.TRIBUTE);
         }

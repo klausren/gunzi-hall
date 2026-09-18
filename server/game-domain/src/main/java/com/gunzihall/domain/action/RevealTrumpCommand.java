@@ -51,11 +51,12 @@ public final class RevealTrumpCommand extends AbstractGameCommand {
 
     @Override
     public CommandResult execute(GameRoom room) {
-        if (room.phase() != GamePhase.BIDDING) {
-            return CommandResult.fail("亮主/反主只能在发牌后的亮主窗口内进行，当前阶段: " + room.phase());
-        }
-        if (claimSuit == null) {
-            return CommandResult.fail("必须指明主花色（本玩法不能叫无主，手册 2.2）");
+        GamePhase phase = room.phase();
+        // 亮主窗口 = 发牌期间 + 发牌后。
+        // 【为什么含 DEALING】手册 2.2 的"抢亮"本就发生在发牌过程中——玩家摸到大王
+        // （第一局）或凑齐级牌/三王时当场就亮，而不是等 156 张全部发完才动手。
+        if (phase != GamePhase.DEALING && phase != GamePhase.BIDDING) {
+            return CommandResult.fail("亮主/反主只能在发牌中或发牌后的亮主窗口内进行，当前阶段: " + phase);
         }
         Player player = Players.find(room, playerId());
         if (player == null) {
@@ -91,7 +92,11 @@ public final class RevealTrumpCommand extends AbstractGameCommand {
             }
         }
 
-        room.setTrump(new TrumpContext(room.currentLevel(), claimSuit));
+        // 主花色已知才建主牌上下文：第一局先亮大王时它还没定（等摸牌），
+        // 此时建 TrumpContext(level, null) 会让后续排序/比较拿到空花色。
+        if (claimSuit != null) {
+            room.setTrump(new TrumpContext(room.currentLevel(), claimSuit));
+        }
         room.setRevealState(candidate);
         if (room.isFirstRound()) {
             room.setBankerSeat(player.seat());

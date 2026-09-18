@@ -55,7 +55,10 @@ public final class ReturnTributeCommand extends AbstractGameCommand {
         room.markTributeReturned(payeeSeat);
 
         if (room.allTributesReturned()) {
-            room.transitionTo(GamePhase.BURYING);
+            // 干锅由 enterBuryingPhase() 统一拦截（原样扣回 → 直接 PLAYING）
+            if (room.enterBuryingPhase()) {
+                return new CommandResult(true, "干锅，底牌原样扣回");
+            }
         }
         return CommandResult.ok();
     }

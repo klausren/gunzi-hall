@@ -4,10 +4,12 @@ import com.gunzihall.domain.player.HumanPlayer;
 import com.gunzihall.domain.player.Player;
 import com.gunzihall.domain.player.Seat;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * 房间管理器：roomId → {@link RoomActor} 路由（架构 v0：战斗服按 RoomId 路由）。
@@ -107,7 +109,7 @@ public final class RoomManager {
             }
             if (actor.room().players().containsKey(seat)) {
                 return JsonUtil.write(Map.of("type", "error",
-                        "reason", "座位已被占用: " + seat));
+                        "reason", "座位已被占用: " + seat + seatHint(actor)));
             }
             actor.join(new HumanPlayer(playerId, seat), false);
             actor.addSink(sink);
@@ -120,6 +122,22 @@ public final class RoomManager {
             sink.send(snapshotMessage(actor, playerId));
         }
         return joined;
+    }
+
+    /**
+     * 入座失败时的补充提示：列出空座。
+     *
+     * <p>为什么要把空座写进错误里：这个错误最常见的成因不是"别人抢先坐了"，
+     * 而是**客户端座位与服务端为真人预留的座位不一致**（本服默认把 3 个座位交给 bot，
+     * 只留 {@link ServerMain#DEFAULT_HUMAN_SEAT} 给真人）。此时空座就是"该坐的那个"，
+     * 直接告诉玩家比让他去翻源码快得多。
+     */
+    private static String seatHint(RoomActor actor) {
+        String free = Arrays.stream(Seat.values())
+                .filter(s -> !actor.room().players().containsKey(s))
+                .map(Enum::name)
+                .collect(Collectors.joining("/"));
+        return free.isEmpty() ? "（本房已满员）" : "（空座: " + free + "）";
     }
 
     /** 客户端命令分发 */

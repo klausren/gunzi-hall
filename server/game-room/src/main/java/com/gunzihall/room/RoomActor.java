@@ -3,12 +3,15 @@ package com.gunzihall.room;
 import com.gunzihall.domain.action.BuryBottomCommand;
 import com.gunzihall.domain.action.CommandResult;
 import com.gunzihall.domain.action.ConfirmTrumpCommand;
+import com.gunzihall.domain.action.DealNextCardCommand;
 import com.gunzihall.domain.action.GameCommand;
+import com.gunzihall.domain.action.PickBottomJokerCommand;
 import com.gunzihall.domain.action.PlayCardsCommand;
 import com.gunzihall.domain.action.ResolveTrumpFromBottomCommand;
 import com.gunzihall.domain.action.ReturnTributeCommand;
 import com.gunzihall.domain.action.RevealTrumpCommand;
 import com.gunzihall.domain.action.SettleRoundCommand;
+import com.gunzihall.domain.action.SetupDealCommand;
 import com.gunzihall.domain.action.ShuffleAndDealCommand;
 import com.gunzihall.domain.action.TributeCommand;
 import com.gunzihall.domain.card.Card;
@@ -75,6 +78,9 @@ public final class RoomActor {
 
     // T-704 超时托管：真人等待上限，归零后由 BotBrain 代打（0 = 关闭）
     private volatile long turnTimeoutMs = 0;
+    /** 逐张发牌的节奏（每张间隔毫秒）。必须与 bot 思考时长分开：发牌若吃 0.8~2.5s
+     *  的思考时长，156 张要发好几分钟 */
+    private volatile long dealDelayMs = 60;
     /** 已装弹的超时任务（等待真人时装、有人行动后取消/空响） */
     private ScheduledFuture<?> timeoutTask;
     /** 装弹时的 actionSeq：归零时若已变化说明真人行动过 → 空响直接返回 */
@@ -95,6 +101,13 @@ public final class RoomActor {
     private boolean stuck = false;
     private int consecutiveFailures = 0;
     private boolean replaying = false;
+    /**
+     * 当前正在处理的是不是真人提交的命令。
+     * <p>用于把「真人误点造成的失败」排除在 bot 驱动的卡死判定之外：
+     * 玩家在超时托管后继续点“出牌”、或界面未刷新时连点，命令必然失败；
+     * 若把这些失败计入 {@link #consecutiveFailures}，点够 30 次就会把整局判 stuck。
+     */
+    private boolean humanCommand = false;
 
     public RoomActor(long roomId, RoomStateStore store) {
         this(roomId, store, null, 0);
@@ -192,9 +205,21 @@ public final class RoomActor {
                 return;
             }
             started = true;
-            deal();
+            beginDealing();
             scheduleDrive();
         });
+    }
+
+    /**
+     * 开一局：把房间推进到 DEALING，其余交给驱动循环逐步完成。
+     *
+     * <p>这里刻意**不**直接发牌——洗牌与逐张发牌都在 DEALING 分支里由 step 推进，
+     * 发牌才"看得见"（玩家边摸牌边抢亮，手册 2.2），而不是一条命令瞬间发完。
+     */
+    private void beginDealing() {
+        if (room.phase() == GamePhase.WAITING) {
+            room.transitionTo(GamePhase.DEALING);
+        }
     }
 
     /** 客户端命令入口（异步模式投递到房间线程） */
@@ -240,6 +265,16 @@ public final class RoomActor {
     }
 
     private void handleSpec(CommandSpec spec, boolean replay) {
+        boolean prevHuman = this.humanCommand;
+        this.humanCommand = !replay;   // 重放不是真人实时命令
+        try {
+            handleSpec0(spec, replay);
+        } finally {
+            this.humanCommand = prevHuman;
+        }
+    }
+
+    private void handleSpec0(CommandSpec spec, boolean replay) {
         long pid = spec.playerId();
         switch (spec.op()) {
             case "DEAL" -> {
@@ -248,11 +283,26 @@ public final class RoomActor {
                         "DEAL", pid, logOf("DEAL", pid, spec.cards(), spec.suit(), null, null, seed),
                         List.of());
             }
-            case "REVEAL" -> applyLogged(
-                    new RevealTrumpCommand(roomId, pid, CardCodec.decodeAll(spec.cards()),
-                            Suit.valueOf(spec.suit())),
-                    "REVEAL", pid, logOf("REVEAL", pid, spec.cards(), spec.suit(), null, null, null),
-                    CardCodec.decodeAll(spec.cards()));
+            case "SETUP_DEAL" -> {
+                long seed = spec.seed() != null ? spec.seed() : newSeed();
+                applyLogged(new SetupDealCommand(roomId, pid, seed),
+                        "SETUP_DEAL", pid, logOf("SETUP_DEAL", pid, null, null, null, null, seed),
+                        List.of());
+            }
+            case "DEAL_NEXT" -> applyLogged(new DealNextCardCommand(roomId, pid),
+                    "DEAL_NEXT", pid, logOf("DEAL_NEXT", pid, null, null, null, null, null), List.of());
+            case "REVEAL" -> {
+                // 第一局抢亮大王时不上送主花色（按手册 2.2 由"随后摸到的第一张花色牌"决定），
+                // 所以这里允许 suit 为空 —— 直接 Suit.valueOf(null) 会 NPE。
+                Suit claim = spec.suit() != null ? Suit.valueOf(spec.suit()) : null;
+                CommandResult rr = applyLogged(
+                        new RevealTrumpCommand(roomId, pid, CardCodec.decodeAll(spec.cards()), claim),
+                        "REVEAL", pid, logOf("REVEAL", pid, spec.cards(), spec.suit(), null, null, null),
+                        CardCodec.decodeAll(spec.cards()));
+                if (!replay) {
+                    advanceBidAfterHuman(pid, rr.success());
+                }
+            }
             case "CONFIRM" -> applyLogged(new ConfirmTrumpCommand(roomId, pid),
                     "CONFIRM", pid, logOf("CONFIRM", pid, null, null, null, null, null), List.of());
             case "RESOLVE_BOTTOM" -> applyLogged(
@@ -273,6 +323,15 @@ public final class RoomActor {
                     new BuryBottomCommand(roomId, pid, CardCodec.decodeAll(spec.cards())),
                     "BURY", pid, logOf("BURY", pid, spec.cards(), null, null, null, null),
                     CardCodec.decodeAll(spec.cards()));
+            // 【他人捡牌扣王】手册 2.3 第 5 条：庄家扣完底后，其他三家依次可把自己的王
+            // 扣进底牌并捡回同样张数的最小非分牌。cards 为空 = 本轮过（让给下一家）。
+            case "PICK_JOKER" -> {
+                List<Card> jokers = spec.cards() != null
+                        ? CardCodec.decodeAll(spec.cards()) : List.of();
+                applyLogged(new PickBottomJokerCommand(roomId, pid, jokers),
+                        "PICK_JOKER", pid,
+                        logOf("PICK_JOKER", pid, spec.cards(), null, null, null, null), jokers);
+            }
             case "PLAY" -> applyLogged(
                     new PlayCardsCommand(roomId, pid, CardCodec.decodeAll(spec.cards())),
                     "PLAY", pid, logOf("PLAY", pid, spec.cards(), null, null, null, null),
@@ -287,7 +346,7 @@ public final class RoomActor {
                 room.hardResetToWaiting();
                 stuck = false;
                 if (room.isFull()) {
-                    deal();
+                    beginDealing(); // 逐张发牌：余下交给驱动循环（submit 尾部会 scheduleDrive）
                 } else {
                     emit("NEWGAME", pid, false, "房间未满 4 人，无法开新局", List.of());
                 }
@@ -335,10 +394,57 @@ public final class RoomActor {
 
     // ================= bot 驱动状态机 =================
 
+    /**
+     * 一次性发完（旧路径）：只保留给"底牌全王 → 重新洗牌"这种 BIDDING 阶段的重入场景
+     * ——那时阶段已经走到 BIDDING，状态机不允许倒回 DEALING，只能整副重发。
+     * 正常开局走 {@link #beginDealing()} 进入 DEALING，再由下面的逐张发牌推进。
+     */
     private void deal() {
         long pid = anyPlayerId();
         applyLogged(new ShuffleAndDealCommand(roomId, pid, newSeed()),
                 "DEAL", pid, logOf("DEAL", pid, null, null, null, null, lastSeed), List.of());
+    }
+
+    /** 逐张发牌第一步：洗牌并把整副牌放进房间牌堆（一步完成，随后每步发一张） */
+    private void setupDeal() {
+        long pid = anyPlayerId();
+        long seed = newSeed();
+        applyLogged(new SetupDealCommand(roomId, pid, seed),
+                "SETUP_DEAL", pid, logOf("SETUP_DEAL", pid, null, null, null, null, seed), List.of());
+    }
+
+    /** 逐张发牌：发一张给当前座位，并让刚拿到牌的一方尝试抢亮 */
+    private boolean dealOneCard() {
+        long pid = anyPlayerId();
+        Seat seat = room.dealTurn();
+        CommandResult r = applyLogged(new DealNextCardCommand(roomId, pid),
+                "DEAL_NEXT", pid, logOf("DEAL_NEXT", pid, null, null, null, null, null), List.of());
+        if (r.success()) {
+            trySnipeReveal(seat);
+        }
+        return r.success();
+    }
+
+    /**
+     * 发牌过程中"抢亮"：摸到大王（第一局）或凑齐级牌/三王的一方当场亮。
+     *
+     * <p>真人靠客户端点图标抢，这里只驱动 bot —— 两边抢同一段窗口，
+     * 谁先亮谁定（第一局大王声明不可反，手册 2.2）。
+     */
+    private void trySnipeReveal(Seat seat) {
+        if (!isBot(seat)) {
+            return;
+        }
+        Player p = room.playerAt(seat);
+        BotBrain.RevealDecision d = BotBrain.decideReveal(room, p);
+        if (d == null) {
+            return;
+        }
+        applyLogged(new RevealTrumpCommand(roomId, p.playerId(), d.cards(), d.claimSuit()),
+                "REVEAL", p.playerId(),
+                logOf("REVEAL", p.playerId(), CardCodec.encodeAll(d.cards()),
+                        d.claimSuit() != null ? d.claimSuit().name() : null, null, null, null),
+                d.cards());
     }
 
     private long lastSeed;
@@ -366,8 +472,11 @@ public final class RoomActor {
                 if (room.gameNumber() > stopAfterGames) {
                     return false;
                 }
-                deal();
-                return true;
+                if (room.dealRemaining() == 0) {
+                    setupDeal();          // 第一步：洗牌裁堆（牌堆空 = 还没洗牌）
+                    return true;
+                }
+                return dealOneCard();      // 之后每步发一张；发满 156 张时自动进 BIDDING
             }
             case BIDDING -> {
                 return stepBidding();
@@ -431,16 +540,29 @@ public final class RoomActor {
         }
 
         Seat seat = bidTurn;
-        bidTurn = seat.next();
         Player p = room.playerAt(seat);
-        if (isBot(seat)) {
+        // 【真人回合】在线真人且手里有能亮/能反的牌 → 停在这里等他点。
+        //
+        // 原先这里不管座位是谁都直接 bidPasses++ 跳过去，等于真人根本没有回合：
+        // 他的"窗口"只有 bot 转一圈的时间（约 3~7 秒），第一局 bot 手握大王时
+        // 一圈就把庄抢走了，真人根本来不及点（2026-09-15 定位到的真因）。
+        // 手里没料则直接算过 —— 不给玩家制造无意义的空等。
+        boolean auto = isBot(seat) || !seatOnline(seat);
+        // turnTimeoutMs <= 0 时（托管被显式关闭）不能停等，否则没人兜底会永久卡死亮主窗口
+        if (!auto && hasRevealOption(seat) && turnTimeoutMs > 0) {
+            return false; // 交由 armTimeout 装弹兜底（到点按"过"处理）
+        }
+
+        bidTurn = seat.next();
+        if (auto) {
             BotBrain.RevealDecision d = BotBrain.decideReveal(room, p);
             if (d != null) {
                 CommandResult r = applyLogged(
                         new RevealTrumpCommand(roomId, p.playerId(), d.cards(), d.claimSuit()),
                         "REVEAL", p.playerId(),
                         logOf("REVEAL", p.playerId(), CardCodec.encodeAll(d.cards()),
-                                d.claimSuit().name(), null, null, null), d.cards());
+                                d.claimSuit() != null ? d.claimSuit().name() : null,
+                                null, null, null), d.cards());
                 if (r.success()) {
                     bidPasses = 0;
                     return true;
@@ -450,6 +572,44 @@ public final class RoomActor {
         }
         bidPasses++;
         return true; // 过牌也是一步（继续轮转）
+    }
+
+    /** 该座位手里是否有可亮/可反的牌（决定亮主窗口是否要停下来等他） */
+    private boolean hasRevealOption(Seat seat) {
+        Player p = room.players().get(seat);
+        if (p == null) {
+            return false;
+        }
+        // 已经拿着当前最高声明的座位不再被等待：否则他亮完一轮后，手里剩下的牌
+        // （比如同级牌还能"加固"）会让窗口再次停在他身上，玩家就得反复点同一个图标
+        // 才能往下走，体感是"点了没反应"。想加固仍可主动点，只是不再强制他表态。
+        if (room.revealState().map(r -> r.seat() == seat).orElse(false)) {
+            return false;
+        }
+        return BotBrain.decideReveal(room, p) != null;
+    }
+
+    /**
+     * 真人在亮主窗口点完图标后的收尾：把轮转推进到下一家。
+     *
+     * <p>为什么必须做：真人"有料"时 {@link #stepBidding()} 会停在他身上等
+     * （return false），不推进就永远停在同一个人，他亮完也走不到下一家。
+     * 亮成功则窗口重开（bidPasses 归零，其余三家仍可反主）。
+     */
+    private void advanceBidAfterHuman(long playerId, boolean success) {
+        if (room.phase() != GamePhase.BIDDING || bidPasses >= 4) {
+            return;
+        }
+        Player p = playerById(playerId);
+        if (p == null || p.seat() != bidTurn) {
+            return;
+        }
+        bidTurn = bidTurn.next();
+        if (success) {
+            bidPasses = 0;
+        } else {
+            bidPasses++; // 亮不动 → 视同过
+        }
     }
 
     private boolean stepTribute() {
@@ -503,6 +663,16 @@ public final class RoomActor {
     }
 
     private boolean stepBury() {
+        // 【优先】他人捡牌扣王窗口（手册 2.3.5）：庄家扣完之后三家依次表态，
+        // 队列问完（GameRoom.advanceBuryPick）才会进入 PLAYING。
+        Seat picker = room.buryPickSeat();
+        if (picker != null) {
+            if (isHuman(picker) && seatOnline(picker)) {
+                return false; // 等真人点"扣王 / 跳过"（超时由 onHumanTimeout 兜底为过）
+            }
+            doPickJoker(picker);
+            return true;
+        }
         Seat bankerSeat = room.bankerSeat().orElse(null);
         if (bankerSeat == null) {
             return false;
@@ -514,7 +684,62 @@ public final class RoomActor {
         return true;
     }
 
-    /** 扣底动作（bot / 超时托管共用） */
+    /**
+     * 底牌该不该对所有人下发（手册 2.3 系列）。快照 {@code bottom} 字段的唯一判据 ——
+     * 客户端只认字段，不自己判断"现在该不该公开底牌"，避免规则在两端各写一份走散。
+     *
+     * <ol>
+     *   <li>干锅局：全程公开（2.3.7；干锅跳过 BURYING，不在这里补发就永远看不到）；</li>
+     *   <li>BURYING 且庄家还没收底：桌上那 6 张就是"原底牌"，本就该摊开（2.3.1）；</li>
+     *   <li>{@code bottomRevealed}：扣王即公开（2.3.3 庄家扣王 / 2.3.5 他人扣王），
+     *       他人扣王窗口期间也临时置真，好让三家看清牌面再决定押不押。</li>
+     * </ol>
+     * 三条都不成立 → 庄家扣回去的 6 张是机密，不下发（庄家本人另有私有 myBottom）。
+     */
+    private boolean bottomVisible() {
+        if (room.isDryPot()) {
+            return true;
+        }
+        if (room.phase() == GamePhase.BURYING && !room.isBottomTaken()) {
+            return true;
+        }
+        return room.isBottomRevealed();
+    }
+
+    /**
+     * 他人捡牌扣王动作（bot / 掉线接管 / 超时托管共用）。
+     *
+     * <p>【依赖不变量】{@link BotBrain#pickBottomJokers} 选出的牌必须能通过
+     * {@link PickBottomJokerCommand}（张数上限 = 底牌可捡的非分牌数）。与埋牌同理 ——
+     * 一旦不成立，失败计数会持续累加把房间判成 stuck、bot 驱动永久停摆。
+     * 护栏见 {@code BotPickJokerConsistencyTest}。
+     *
+     * <p>失败一律退化为"过"：扣王是可选动作，卡在这里比放弃更糟 —— 窗口不推进，
+     * 三家问不完，牌局就永远进不了 PLAYING（这正是"整局冻死在扣底"那类事故的形态）。
+     */
+    private void doPickJoker(Seat picker) {
+        Player p = room.playerAt(picker);
+        List<Card> jokers = BotBrain.pickBottomJokers(room, p);
+        CommandResult r = applyLogged(new PickBottomJokerCommand(roomId, p.playerId(), jokers),
+                "PICK_JOKER", p.playerId(),
+                logOf("PICK_JOKER", p.playerId(), CardCodec.encodeAll(jokers), null, null, null, null),
+                jokers);
+        if (r.isFailure()) {
+            applyLogged(new PickBottomJokerCommand(roomId, p.playerId(), List.of()),
+                    "PICK_JOKER", p.playerId(),
+                    logOf("PICK_JOKER", p.playerId(), null, null, null, null, null), List.of());
+        }
+    }
+
+    /**
+     * 扣底动作（bot / 超时托管共用）。
+     *
+     * <p>【依赖不变量】{@link BotBrain#buryCards} 选出的牌必须能通过 {@link BuryBottomCommand}。
+     * 一旦不成立，这里会「首选失败 → 兜底（原样底牌）再失败」地循环，失败计数每轮 +2，
+     * 十几轮就把房间判成 stuck、bot 停摆，整局冻死在扣底（2026-09-17 就是这么冻的：
+     * bot 的干锅口径漏了首局豁免，把含小王的底牌原样提交，撞上 Q5 扣王校验）。
+     * 该不变量由 {@code BotBuryCommandConsistencyTest} 锁住。
+     */
     private void doBury(Seat bankerSeat) {
         Player banker = room.playerAt(bankerSeat);
         List<Card> combined = new ArrayList<>(banker.hand());
@@ -615,6 +840,15 @@ public final class RoomActor {
     /** 当前在等哪个真人行动；不在等真人返回 null */
     private Seat humanWaiter() {
         switch (room.phase()) {
+            case BIDDING -> {
+                // 亮主窗口停在某个真人身上时，超时任务要认这个座位（到点视为"过"）
+                if (bidPasses < 4) {
+                    Seat turn = bidTurn;
+                    if (isHuman(turn) && seatOnline(turn) && hasRevealOption(turn)) {
+                        return turn;
+                    }
+                }
+            }
             case PLAYING -> {
                 Seat turn = room.turnSeat().orElse(null);
                 if (turn != null && isHuman(turn)) {
@@ -622,9 +856,17 @@ public final class RoomActor {
                 }
             }
             case BURYING -> {
-                Seat banker = room.bankerSeat().orElse(null);
-                if (banker != null && isHuman(banker)) {
-                    return banker;
+                // 他人扣王窗口优先：等的是当前轮到的那一家（超时按"过"处理）
+                Seat picker = room.buryPickSeat();
+                if (picker != null) {
+                    if (isHuman(picker) && seatOnline(picker)) {
+                        return picker;
+                    }
+                } else {
+                    Seat banker = room.bankerSeat().orElse(null);
+                    if (banker != null && isHuman(banker)) {
+                        return banker;
+                    }
                 }
             }
             case TRIBUTE -> {
@@ -664,8 +906,24 @@ public final class RoomActor {
             Player p = room.playerAt(waiter);
             emit("AUTO", p.playerId(), true, "超时托管：系统代打", List.of());
             switch (room.phase()) {
+                case BIDDING -> {
+                    // 亮主窗口到点没点 → 视为"过"，推进轮转让下一家表态
+                    if (waiter == bidTurn) {
+                        bidTurn = bidTurn.next();
+                        bidPasses++;
+                    }
+                }
                 case PLAYING -> actPlay(waiter);
-                case BURYING -> doBury(waiter);
+                case BURYING -> {
+                    // 扣王窗口到点没点 → 按"过"处理（推进到下一家），不能卡住整桌。
+                    // 这里必须区分"等的是扣王"还是"等的是扣底"：拿扣王窗口的座位去发
+                    // BURY 命令会被"只有庄家能扣底"挡住，反复失败就把房间判成 stuck。
+                    if (room.buryPickSeat() == waiter) {
+                        doPickJoker(waiter);
+                    } else {
+                        doBury(waiter);
+                    }
+                }
                 case TRIBUTE -> {
                     if (room.pendingTributes().containsKey(waiter)) {
                         doTribute(waiter, room.pendingTributes().get(waiter).bloodCount());
@@ -713,10 +971,16 @@ public final class RoomActor {
         }
         emit(op, playerId, r.success(), r.reason(), eventCards);
         if (r.isFailure()) {
-            consecutiveFailures++;
-            if (consecutiveFailures > 30) {
-                stuck = true;
-                emit("STUCK", playerId, false, "连续命令失败过多，bot 停止驱动", List.of());
+            if (humanCommand) {
+                // 真人命令失败（例：超时托管已代打、界面未刷新时连点“出牌”）不算 bot 驱动故障，
+                // 更不能累加到 30 次把整局判 stuck；顺手清零，避免历史计数把后续失败推过阈值。
+                consecutiveFailures = 0;
+            } else {
+                consecutiveFailures++;
+                if (consecutiveFailures > 30) {
+                    stuck = true;
+                    emit("STUCK", playerId, false, "连续命令失败过多，bot 停止驱动", List.of());
+                }
             }
         } else {
             consecutiveFailures = 0;
@@ -780,6 +1044,10 @@ public final class RoomActor {
         m.put("roomId", roomId);
         m.put("phase", room.phase().name());
         m.put("gameNumber", room.gameNumber());
+        // 是否本轮第一局：第一局"抢亮 1 张大王"与第二局起"亮/反级牌"是两套完全不同的
+        // 亮主规则，客户端要靠它决定图标栏点亮逻辑（光看 gameNumber 不行——出锅回到
+        // 第一局时 gameNumber 并不会归 1）。只读字段，不参与任何规则判定。
+        m.put("firstRound", room.isFirstRound());
         m.put("level", room.currentLevel());
         Optional<TrumpContext> trump = room.trump();
         if (trump.isPresent()) {
@@ -788,12 +1056,59 @@ public final class RoomActor {
         }
         Optional<TrumpReveal> reveal = room.revealState();
         if (reveal.isPresent()) {
-            m.put("reveal", Map.of("kind", reveal.get().kind().name(),
-                    "suit", reveal.get().suit().name(),
-                    "seat", reveal.get().seat().name()));
+            // count = 级牌张数（非级牌声明恒为 0）。客户端反主高亮必须知道它：
+            // "2 张反 1 张、3 张反 2 张或 1 张"这条只看 kind 是算不出来的。
+            Map<String, Object> rm = new LinkedHashMap<>();
+            rm.put("kind", reveal.get().kind().name());
+            // 第一局"已亮大王、主花色待摸"时主花色为空 → 不下发该字段（客户端按 undefined 处理）。
+            // 注意不能用 Map.of：它不接受 null 值，会直接抛 NPE。
+            if (reveal.get().suit() != null) {
+                rm.put("suit", reveal.get().suit().name());
+            }
+            rm.put("count", reveal.get().levelCardCount());
+            rm.put("seat", reveal.get().seat().name());
+            m.put("reveal", rm);
         }
         m.put("banker", room.bankerSeat().map(Seat::name).orElse(null));
         m.put("turn", room.turnSeat().map(Seat::name).orElse(null));
+        m.put("dryPot", room.isDryPot());
+        // ---- 底牌公开（手册 2.3.1 ~ 2.3.8） ----
+        // 【口径说明】手册 2.3.1 写的是"发牌或反主结束后公开"，落到实现里取的是
+        // **进入扣底（庄家收底）那一刻**：收底之前这 6 张谁都没碰过，提前摊给所有人看
+        // 等于把底牌内容泄给庄家的对手去影响亮主/反主决策。手册 2.3.3 那句
+        // "不扣王时底牌不公开"指的是**庄家扣回去的新底牌**，两条并不冲突：
+        // 摊开给大家看的是"原底牌"，保密的是"新底牌"。
+        //
+        // 会对所有人下发这 6 张的情形（见 bottomVisible()）：
+        //   ① 扣底阶段（BURYING）且庄家还没收底：桌上这 6 张就是"原底牌"，本就该摊开；
+        //   ② 干锅局（dryPot）：底牌不能替换、只能原样扣回（2.3.7），而且干锅会**整段跳过
+        //      BURYING 直接进 PLAYING**（GameRoom.enterBuryingPhase），不在这里补发，
+        //      玩家从头到尾都看不到那 6 张；
+        //   ③ bottomRevealed —— **扣王就公开**（2.3.3 庄家扣王 / 2.3.5 他人扣王）。
+        //      公开是"押中之后"的后果，**扣王窗口期间不摊牌**：窗口开着而还没人扣时，
+        //      底牌依旧是庄家扣出时那份机密，那三家只能从 pickSeat / pickMax 知道
+        //      "谁表态、最多能押几张"；真有人扣了才翻成公开并一直公开到结算，
+        //      三家全"过"则始终没露过面，收口时由 GameRoom.advanceBuryPick →
+        //      refreshBottomReveal 把标志校正回机密。
+        // 其余时间（正常局 PLAYING 起且底牌无王）**不下发**：庄家扣回去的 6 张是机密。
+        // **庄家自己要能回看**（否则他连扣了哪 6 张都无从查证）—— 那条走下面的私有字段
+        // myBottom，只发给庄家本人，不是公开。
+        //
+        // 【依赖的不变量】BURYING 阶段 room.bottomCards() 在庄家收底前必须仍是**原底牌**：
+        // 覆盖动作 room.setBottomCards(新牌) 只发生在 BuryBottomCommand 成功路径的**末尾**，
+        // 失败路径不会走到。由 game-room 的 BottomRevealTest 锁住。
+        if (bottomVisible()) {
+            m.put("bottom", CardCodec.encodeAll(room.bottomCards()));
+        }
+        m.put("bottomRevealed", room.isBottomRevealed());
+        // ---- 他人捡牌扣王窗口（手册 2.3.5） ----
+        // 只下发"轮到谁"和"最多能扣几张"，客户端据此决定是否显示"扣王 / 跳过"，
+        // 不在客户端复算规则（谁能扣、能扣几张一律以服务端为准）。
+        Seat buryPickSeat = room.buryPickSeat();
+        if (buryPickSeat != null) {
+            m.put("pickSeat", buryPickSeat.name());
+            m.put("pickMax", room.bottomPickableCount());
+        }
         m.put("followRule", room.followRule().name());
         Map<String, Integer> hands = new LinkedHashMap<>();
         for (Seat seat : Seat.values()) {
@@ -813,9 +1128,32 @@ public final class RoomActor {
                     hand.sort(Comparator.comparingInt(Card::rank));
                 }
                 m.put("yourHand", CardCodec.encodeAll(hand));
+
+                // ---- 庄家私有底牌（扣完底之后回看用） ----
+                // 收底那一刻摊开的 6 张原底牌只在 BURYING 阶段公开过一次；扣底成功后
+                // room.bottomCards() 已被 BuryBottomCommand 换成**庄家扣出的新 6 张**，
+                // 客户端若不再下发就彻底"没有能看到底牌的地方"了 —— 连庄家自己都查不到
+                // 刚才扣了哪 6 张。对闲家这 6 张是机密（手册 2.3.3），对庄家却是他必须能
+                // 回看的信息，所以这里**按玩家定制**：只有本端座位就是庄家、且已收底才下发。
+                //
+                // 【不会提前泄露】resetRoundState()（由 SettleRoundCommand 收尾调用）会把
+                // bottomTaken 置回 false，所以下一局发牌/亮主期间即便仍是同一家坐庄，
+                // 也不会把上一局的底牌带出来；新一局的那 6 张要等庄家真的收底
+                // （BuryBottomCommand / 干锅 autoBuryIfDryPot）之后才可能下发。
+                // 干锅局：bottomTaken 为 true，但同一份牌面已经作为公开 bottom 下发，
+                // 客户端按"公开优先"渲染，不会重复展示（见 TableUI.renderBottom）。
+                Seat bankerSeat = room.bankerSeat().orElse(null);
+                if (room.isBottomTaken() && bankerSeat != null && me.seat() == bankerSeat) {
+                    m.put("myBottom", CardCodec.encodeAll(room.bottomCards()));
+                }
             }
         }
         Optional<Trick> trick = room.currentTrick();
+        // 上一圈刚打完时 currentTrick 已清空，但 lastCompletedTrick 还留着那四张；
+        // 出牌/结算阶段把它也发下去，玩家才能看清本轮四张出牌（否则第 4 张直接消失）
+        if (trick.isEmpty() && (room.phase() == GamePhase.PLAYING || room.phase() == GamePhase.SETTLING)) {
+            trick = room.lastCompletedTrick();
+        }
         if (trick.isPresent()) {
             Map<String, Object> t = new LinkedHashMap<>();
             t.put("leader", trick.get().leader().name());
@@ -826,11 +1164,21 @@ public final class RoomActor {
                         "cards", CardCodec.encodeAll(pr.cards())));
             }
             t.put("plays", plays);
+            // 一圈凑齐 4 手时下发赢家座位：客户端收墩动画必须收向真正的赢家，
+            // 不能依赖快照里的 turn —— 下一圈一旦开牌，turn 已经变成"下一个跟牌人"了。
+            if (trick.get().isComplete()) {
+                t.put("winner", trick.get().winnerSeat().name());
+            }
             m.put("trick", t);
         }
         Map<String, Integer> points = new LinkedHashMap<>();
         room.trickPoints().forEach((team, v) -> points.put(team.name(), v));
         m.put("trickPoints", points);
+        // 分牌明细（team → 已收走的 5/10/K 编码列表）：客户端「闲家得分」展开面板用。
+        // 只下发分牌，整圈 4 张不必下发（一局上百张，既费带宽又无展示价值）。
+        Map<String, Object> taken = new LinkedHashMap<>();
+        room.takenPointCards().forEach((team, cs) -> taken.put(team.name(), CardCodec.encodeAll(cs)));
+        m.put("takenPointCards", taken);
         Map<String, Object> tributes = new LinkedHashMap<>();
         room.pendingTributes().forEach((payer, ob) -> tributes.put(payer.name(),
                 Map.of("blood", ob.bloodCount(), "receiver", ob.receiver().name())));
@@ -890,6 +1238,14 @@ public final class RoomActor {
 
     /** 固定延迟（测试/演示）或拟人化随机思考时长（T-701） */
     private long nextBotDelayMs() {
+        // 【发牌节奏单独一档】发牌必须快：若沿用 bot 思考时长（ServerMain 设的
+        // 0.8~2.5s），156 张要发好几分钟。固定用 dealDelayMs（默认 60ms → 约 9 秒）。
+        // 若调用方本来就设了更快的节奏（测试/演示，如 botDelayMs=1），跟随更快的那个，
+        // 否则"快速跑完整局"的测试会被发牌本身拖到超时。
+        if (room.phase() == GamePhase.DEALING) {
+            long base = thinkMaxMs <= 0 ? botDelayMs : thinkMinMs;
+            return Math.min(dealDelayMs, Math.max(base, 1));
+        }
         if (thinkMaxMs <= 0) {
             return botDelayMs;
         }

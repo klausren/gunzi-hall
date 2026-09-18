@@ -73,6 +73,27 @@ public final class Deck {
         return new DealResult(hands, bottom);
     }
 
+    /**
+     * 逐张发牌：从牌堆末尾取一张（取牌方向与 {@link #deal()} 完全一致）。
+     *
+     * <p>存在意义：真实牌桌是一张一张轮流发的，玩家要能"一边摸牌一边亮主"
+     * ——手册 2.2 第一局"亮大王后摸到的第一张花色牌定主"就依赖于此，
+     * 一次性发完时牌堆立刻见底，这条规则无从实现。
+     *
+     * <p>{@link #deal()} 保留给"一次性发完"的旧路径与既有单元测试，两者并存不冲突。
+     */
+    public Card dealOne() {
+        if (cards.isEmpty()) {
+            throw new IllegalStateException("牌堆已空，不能再发牌");
+        }
+        return cards.remove(cards.size() - 1);
+    }
+
+    /** 剩余未发张数（发到 0 时余下的即底牌） */
+    public int remaining() {
+        return cards.size();
+    }
+
     public List<Card> cards() {
         return Collections.unmodifiableList(cards);
     }
