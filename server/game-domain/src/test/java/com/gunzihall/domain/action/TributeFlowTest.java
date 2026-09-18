@@ -129,4 +129,28 @@ class TributeFlowTest {
         var r2 = room.apply(new TributeCommand(1001L, 4L, List.of(Card.of(Suit.SPADE, 5))));
         assertTrue(r2.success(), "打 5 时级牌 5 必须可进贡: " + r2.reason());
     }
+
+    /**
+     * 进贡 / 还贡必须**留档**：谁贡给谁、贡了哪几张、还了哪几张。
+     *
+     * <p>「闲家得分」展开面板要按这两条显示明细，而义务一付清就从 pendingTributes
+     * 里摘掉了 —— 收贡人只能在 recordTribute 那一刻顺手留下，事后没法补推。
+     */
+    @Test
+    void tributeAndReturnCardsAreArchivedForPanel() {
+        prepTribute(2, List.of(Card.bigJoker(), Card.smallJoker(), Card.of(Suit.SPADE, 14)));
+
+        assertTrue(room.apply(new TributeCommand(1001L, 2L,
+                List.of(Card.bigJoker(), Card.smallJoker()))).success());
+
+        assertTrue(room.pendingTributes().isEmpty(), "交完贡，义务即摘除");
+        assertEquals(Seat.NORTH, room.tributeReceivers().get(Seat.EAST),
+                "收贡人必须留档：面板要讲清「谁贡给了谁」");
+
+        List<Card> back = List.of(Card.of(Suit.HEART, 13), Card.of(Suit.CLUB, 7));
+        assertTrue(room.apply(new ReturnTributeCommand(1001L, 1L, Seat.EAST, back)).success());
+
+        assertEquals(back, room.tributeReturnedCards().get(Seat.EAST),
+                "还贡的牌面必须留档：面板要显示还贡的是哪几张");
+    }
 }

@@ -111,6 +111,23 @@ export interface SnapshotMsgDown {
     settlement?: SettlementMsg;             // 上一局结算（SETTLED 阶段读取）
     dryPot?: boolean;                        // 本局是否干锅（底牌无主花色普通牌）
     /**
+     * 本局是否有人扣王（手册 2.3.3 庄家扣王 / 2.3.5 他人捡牌扣王）。
+     *
+     * <p>【别拿 bottomRevealed 顶替】那个是**可见性**口径（底牌摊没摊开），本字段是
+     * **事实**口径。两者今天几乎同真同假，但**干锅局会分叉**：干锅是原样扣回，底牌里
+     * 那几张王是发牌发出来的（手册 2.3.7 专门为"干锅底牌王"立规），此时
+     * `bottomRevealed` 会因"底牌含王"为真，而"有人扣王"必须仍为假。
+     */
+    jokerBuried?: boolean;
+    /**
+     * 本局**已完成**的进贡流水（谁贡给谁、贡了哪几张、还贡还了哪几张）。
+     *
+     * <p>与 `pendingTributes`（只说明"还欠多少血"）互补：这里是已发生的牌面明细。
+     * 进贡与还贡都是公开动作（真实牌桌上就是摊在桌面上的），所以对四家一视同仁地下发。
+     * 数组为空 = 本局没有进贡。
+     */
+    tributes?: TributeLogMsg[];
+    /**
      * 公开的底牌（6 张原底牌，牌面编码）。
      *
      * <p>只在三种情况下发，均由服务端按规则判定（手册 2.3.1 / 2.3.3 / 2.3.5 / 2.3.7）：
@@ -155,6 +172,19 @@ export interface SnapshotMsgDown {
     /** 本次最多能扣几张王（= 底牌里可捡的非分牌张数）；只在 pickSeat 出现时下发 */
     pickMax?: number;
     [k: string]: unknown;
+}
+
+/**
+ * 一笔进贡流水（服务端 GameRoom.tributeReceived / tributeReturnedCards）。
+ *
+ * <p>`returned` 缺省 = 还没还贡（收贡人尚未出牌）。两副牌面各自独立：
+ * 进贡可能欠着、也可能已还，界面据此决定显示"待进贡 / 已进贡 / 已还贡"。
+ */
+export interface TributeLogMsg {
+    payer: SeatName;            // 进贡人
+    receiver: SeatName;         // 收贡人（= 进贡人的下家，服务端留档）
+    cards: string[];            // 已交的贡牌
+    returned?: string[];        // 已还的牌（缺省 = 还没还）
 }
 
 /** 一局结算结果（服务端 RoundSettlement.Result） */

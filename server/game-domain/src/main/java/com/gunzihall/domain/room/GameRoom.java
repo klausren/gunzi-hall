@@ -96,6 +96,19 @@ public final class GameRoom {
      */
     private boolean bottomRevealed;
     /**
+     * 本局是否有**王被扣进底牌**（庄家扣王 2.3.3，或他人捡牌扣王 2.3.5）。
+     *
+     * <p>【为什么单独一个字段，不复用 {@link #bottomRevealed}】那个是**可见性**口径
+     * （决定底牌摊不摊开），本字段是**事实**口径（本局到底有没有人扣王）。今天两者
+     * 恰好同真同假（底牌含王 ⇔ 有人扣王），但语义不同：只要将来多一处调
+     * {@code refreshBottomReveal()}（比如"某些局面强制摊底牌给判罚用"），两者立刻分叉。
+     * 面板要报给玩家的是**事实**，所以由扣王的两条命令各自置位。
+     *
+     * <p>干锅局（2.3.7）永远是 false —— 底牌不能替换、也没人能扣，即便那 6 张里本来就
+     * 带着王，那也是发牌发出来的，不算"扣"。
+     */
+    private boolean jokerBuried;
+    /**
      * 他人捡牌扣王（手册 2.3 第 5 条）的待询问队列，队首即当前轮到的那一家。
      *
      * <p>【为什么是队列而不是"谁先点谁扣"】手册没写多人同时扣王的先后，本项目拍板为
@@ -113,6 +126,17 @@ public final class GameRoom {
     private final Map<Seat, List<Card>> tributeReceived = new EnumMap<>(Seat.class);
     /** 已完成还贡的 payer 座位 */
     private final EnumSet<Seat> tributeReturned = EnumSet.noneOf(Seat.class);
+    /**
+     * 每笔进贡的**收贡人**（payer 座位 → 收贡人座位）。
+     *
+     * <p>进贡义务一旦付清就从 {@link #pendingTributes} 里摘掉了，而快照与界面面板还要
+     * 讲清"谁贡给了谁" —— 所以在 {@link #recordTribute} 里顺手把收贡人留下来，
+     * 不必让上层再去推（"进贡人 = 收贡人的上家"这条关系只写在规则手册里，
+     * 不该在快照组装处再复算一遍）。
+     */
+    private final Map<Seat, Seat> tributeReceiverOf = new EnumMap<>(Seat.class);
+    /** 已还贡的**牌面**（payer 座位 → 还贡牌）：面板要显示"还贡的牌都是哪些" */
+    private final Map<Seat, List<Card>> tributeReturnedCards = new EnumMap<>(Seat.class);
     /** 最近一次一局结算结果（SettleRoundCommand 产出） */
     private RoundSettlement.Result lastSettlement;
     /** 最近一次进贡血数计算结果 */
@@ -497,6 +521,15 @@ public final class GameRoom {
         this.bottomRevealed = bottomRevealed;
     }
 
+    /** 本局是否有人扣王（庄家 2.3.3 / 他人 2.3.5）；快照 {@code jokerBuried} 的唯一来源 */
+    public boolean isJokerBuried() {
+        return jokerBuried;
+    }
+
+    public void setJokerBuried(boolean jokerBuried) {
+        this.jokerBuried = jokerBuried;
+    }
+
     /**
      * 底牌是否允许"他人捡牌扣王"（手册 2.3.5 的准入条件）。
      *
@@ -633,18 +666,36 @@ public final class GameRoom {
         return Collections.unmodifiableMap(tributeReceived);
     }
 
-    /** 记录一笔已收进贡（payer → 贡牌），并移除其义务 */
+    /** 记录一笔已收进贡（payer → 贡牌），并移除其义务；收贡人同时留档（供快照/面板用） */
     public void recordTribute(Seat payer, List<Card> cards) {
+        TributeObligation obligation = pendingTributes.remove(payer);
+        if (obligation != null) {
+            tributeReceiverOf.put(payer, obligation.receiver());
+        }
         tributeReceived.put(payer, List.copyOf(cards));
-        pendingTributes.remove(payer);
+    }
+
+    /** 每笔进贡的收贡人（payer → receiver）；没进贡过则不含该键 */
+    public Map<Seat, Seat> tributeReceivers() {
+        return Collections.unmodifiableMap(tributeReceiverOf);
+    }
+
+    /** 已还贡的牌面（payer → 还贡牌）；还没还贡则不含该键 */
+    public Map<Seat, List<Card>> tributeReturnedCards() {
+        return Collections.unmodifiableMap(tributeReturnedCards);
     }
 
     public boolean isTributeReturned(Seat payer) {
         return tributeReturned.contains(payer);
     }
 
-    public void markTributeReturned(Seat payer) {
+    /**
+     * 标记已还贡，并记下**还了哪几张**（面板"还贡的牌都是哪些"的数据来源）。
+     * 还贡张数恒等于进贡张数（{@code ReturnTributeCommand} 已校验），这里不再复核。
+     */
+    public void markTributeReturned(Seat payer, List<Card> cards) {
         tributeReturned.add(payer);
+        tributeReturnedCards.put(payer, List.copyOf(cards));
     }
 
     /** 全部进贡是否均已还贡（TRIBUTE → BURYING 的切换条件） */
@@ -685,10 +736,13 @@ public final class GameRoom {
         bottomTaken = false;
         dryPot = false;
         bottomRevealed = false;
+        jokerBuried = false;
         buryPickQueue.clear();
         pendingTributes.clear();
         tributeReceived.clear();
         tributeReturned.clear();
+        tributeReceiverOf.clear();
+        tributeReturnedCards.clear();
     }
 
     /**

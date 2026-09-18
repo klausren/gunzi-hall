@@ -106,6 +106,9 @@ public final class PickBottomJokerCommand extends AbstractGameCommand {
 
         // 手册 2.3.5「扣王时底牌必须公开」——从此这张底牌对所有人可见
         room.setBottomRevealed(true);
+        // 本局"有人扣王"这个事实（供面板回看）。注意两个字段语义不同：
+        // 上面那个管可见性，这个管事实；今天同真同假，将来不保证。
+        room.setJokerBuried(true);
         room.advanceBuryPick();
         return CommandResult.ok();
     }

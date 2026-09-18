@@ -87,6 +87,8 @@ function makeStub(label) {
 // 少了这几样，测试就只能手写 ui.selected，而手写的"裸牌码"和真实的"复合身份"
 // 是两种形状 —— 2026-09-18"选大王也提示只能扣王"正是被这个差异漏掉的（见第 24 段）。
 let createdTiles = [];
+// addSuitIcon 的调用留痕：用来断言"面板算对了提亮配色，也真的把提亮配色交了出去"
+let suitIconCalls = [];
 const fakeTile = () => ({
     children: [],
     handlers: {},
@@ -105,7 +107,7 @@ const fakeTile = () => ({
 const cardUiStub = {
     createTileNode: () => { const t = fakeTile(); createdTiles.push(t); return t; },
     addTileText: () => { /* noop */ },
-    addSuitIcon: () => { /* noop */ },
+    addSuitIcon: (parent, suit, x, y, size, color) => { suitIconCalls.push({ suit, color }); },
     suitColor: () => '#000000',
     cardFace: (c) => ({ text: String(c) }),
     createCardNode: () => fakeTile(),
@@ -261,7 +263,10 @@ function snap(gameNumber, phase, turn, plays) {
 }
 const trick = (leader, cards) => ({ seat: leader, cards });
 
-/** 造一个能跑铭牌标记（renderTrumpMark）的实例：铭牌根节点用哑节点顶掉 */
+/**
+ * 造一个能跑铭牌标记（renderSeatBadges / renderTrumpMark / renderBankerMark）的实例：
+ * 铭牌根节点用哑节点顶掉，四家的标记账本各清一份。
+ */
 function newBadgeUi() {
     const ui = newUi();
     ui.seatRoot = {
@@ -272,6 +277,8 @@ function newBadgeUi() {
     };
     ui.seatTrumpNode = {};
     ui.seatTrumpSig = {};
+    ui.seatBankerNode = {};
+    ui.seatBankerSig = {};
     return ui;
 }
 const resetTiles = () => { createdTiles = []; };
@@ -988,6 +995,243 @@ const SIX_BOTTOM = ['H4', 'S6', 'C4', 'C6', 'D4', 'D7'];
     check('超过 pickMax 张 → 提示上限且不发命令',
         over.sent.length === 0 && /最多扣 2 张/.test(over.ui.toastLabel.string),
         `sent=${JSON.stringify(over.sent)} toast=${over.ui.toastLabel.string}`);
+}
+
+// --- 26. 【Tracy 反馈】抓分方上台后，下一局的庄家标记必须切到新庄家 ---
+// 症状：闲家（抓分方）得分 >= 120，结算弹窗也提示"抓分方上台！"，
+//   但**下一局开局时"庄"瓦片仍挂在原来那个庄家的铭牌旁**。
+//
+// 根因（客户端）：牌桌标记的庄家口径写成了
+//     IN_GAME_PHASES.has(phase) ? s.banker : this.preSettleBanker
+// 而 DEALING / BIDDING（新一局的发牌与亮主）恰好落在"其余"分支 → 用了**上一局**的庄家。
+// 服务端此时下发的 s.banker 已经是新庄家（SettleRoundCommand 里 setBankerSeat(newBanker)
+// 之后直接 transitionTo(DEALING)），被客户端无视了。
+//
+// 正确口径：**牌桌标记一律以快照为准**（有 s.banker 就用它）；
+//   preSettleBanker 只保留给结算面板 —— 面板要按"本局"的庄/抓分队贴标签，
+//   那才是这个缓冲存在的唯一理由，不该外溢到牌桌标记上。
+{
+    resetTiles();
+    const ui = newBadgeUi();
+    // preSettleBanker 由 renderAll 在局内阶段记下"本局庄"，这里直接给（不跑 renderAll）
+    ui.preSettleBanker = 'SOUTH';
+
+    // (a) 本局出牌：SOUTH 坐庄
+    ui.snap = { gameNumber: 1, phase: 'PLAYING', banker: 'SOUTH', level: 3 };
+    ui.renderSeatBadges(ui.snap);
+    check('本局出牌：庄瓦片在 SOUTH',
+        !!ui.seatBankerNode.SOUTH && !ui.seatBankerNode.NORTH,
+        `S=${!!ui.seatBankerNode.SOUTH} N=${!!ui.seatBankerNode.NORTH}`);
+
+    // (b) 结算中：快照的 banker 仍是本局庄（切庄发生在结算命令里）
+    ui.snap = { gameNumber: 1, phase: 'SETTLING', banker: 'SOUTH', level: 3 };
+    ui.renderSeatBadges(ui.snap);
+    check('结算中：庄瓦片仍在本局庄 SOUTH', !!ui.seatBankerNode.SOUTH);
+
+    // (c) 【核心回归】下一局发牌：抓分方上台，服务端已把 banker 切成 NORTH
+    ui.snap = { gameNumber: 2, phase: 'DEALING', banker: 'NORTH', level: 3 };
+    ui.renderSeatBadges(ui.snap);
+    check('【回归】下一局发牌：庄瓦片必须跟到新庄 NORTH',
+        !!ui.seatBankerNode.NORTH, `N=${!!ui.seatBankerNode.NORTH}`);
+    check('【回归】下一局发牌：旧庄 SOUTH 的庄瓦片必须拆掉',
+        !ui.seatBankerNode.SOUTH, `S=${!!ui.seatBankerNode.SOUTH}`);
+
+    // (d) 亮主阶段同理（BIDDING 同样不在 IN_GAME_PHASES 里）
+    ui.snap = { gameNumber: 2, phase: 'BIDDING', banker: 'NORTH', level: 3 };
+    ui.renderSeatBadges(ui.snap);
+    check('下一局亮主：庄瓦片仍在 NORTH、不在 SOUTH',
+        !!ui.seatBankerNode.NORTH && !ui.seatBankerNode.SOUTH);
+
+    // (e) 新局的扣底/出牌阶段必须和发牌期一致，不许在阶段交界处来回横跳
+    ui.snap = { gameNumber: 2, phase: 'BURYING', banker: 'NORTH', level: 3 };
+    ui.renderSeatBadges(ui.snap);
+    check('下一局扣底：仍在 NORTH（阶段间不许横跳）',
+        !!ui.seatBankerNode.NORTH && !ui.seatBankerNode.SOUTH);
+    ui.snap = { gameNumber: 2, phase: 'PLAYING', banker: 'NORTH', level: 3 };
+    ui.renderSeatBadges(ui.snap);
+    check('下一局出牌：仍在 NORTH', !!ui.seatBankerNode.NORTH && !ui.seatBankerNode.SOUTH);
+
+    // (f) 快照还没给出庄家时（第一局亮主前）回退到本局缓冲，且不许空画瓦片
+    const early = newBadgeUi();
+    early.preSettleBanker = null;
+    early.snap = { gameNumber: 1, phase: 'BIDDING', banker: null, level: 3 };
+    early.renderSeatBadges(early.snap);
+    check('第一局亮主前（banker=null）：四家都不画庄瓦片',
+        !early.seatBankerNode.NORTH && !early.seatBankerNode.SOUTH
+        && !early.seatBankerNode.EAST && !early.seatBankerNode.WEST);
+
+    // (g) 口径必须与"结算面板"分开：面板仍按本局庄分队（不能跟着被改坏）；
+    //     而牌桌瓦片与铭牌金框必须共用**同一个**口径方法，否则两处各错各的。
+    const panel = newBadgeUi();
+    panel.preSettleBanker = 'SOUTH';
+    const tb = typeof panel.tableBanker === 'function' ? panel.tableBanker.bind(panel) : null;
+    check('牌桌/铭牌共用的庄家口径存在，且 DEALING 时取快照的新庄',
+        !!tb && tb({ phase: 'DEALING', banker: 'NORTH' }) === 'NORTH');
+    check('快照没庄家时该口径回退到本局缓冲',
+        !!tb && tb({ phase: 'DEALING', banker: null }) === 'SOUTH');
+}
+
+/**
+ * 造一个能跑 renderScoreBar → buildScorePanel 的实例：面板会挂到 ui.node 上，
+ * 于是可以直接遍历节点树断言"文案与牌面真的画上去了"（而不只是纯函数算对了）。
+ */
+function newScoreUi() {
+    const ui = newUi();
+    ui.node = new FAKE_CC.Node('root');
+    ui.scoreBarNode = new FAKE_CC.Node('scorebar');
+    ui.scoreCapsuleLabel = { string: '' };
+    ui.scoreExpanded = true;
+    ui.mySeat = 'SOUTH';
+    ui.preSettleBanker = 'SOUTH';
+    return ui;
+}
+
+/** 收齐一棵节点树上的所有 Label 文案（面板内容断言用） */
+function collectLabels(root) {
+    const out = [];
+    const walk = (n) => {
+        if (!n) return;
+        const l = n.getComponent ? n.getComponent(FAKE_CC.Label) : null;
+        if (l && typeof l.string === 'string' && l.string) out.push(l.string);
+        (n.children || []).forEach(walk);
+    };
+    walk(root);
+    return out;
+}
+
+// --- 27. 【Tracy 反馈】第一行改报「主牌」+ 得分面板补「本局干锅 / 扣王 / 进贡」 ---
+// 分两层测：① 纯函数（roundFactSegments / tributeRows）—— "话报得对不对"最容易错的地方；
+//          ② 端到端（renderScoreBar → 面板节点树）—— 确认这些文案真的画上去了。
+{
+    const ui = newUi();
+    ui.mySeat = 'SOUTH';
+
+    // (a) 第一行：恒为「第N局 · 主牌」，任何阶段都不再出现阶段词
+    const t3 = ui.topTitle({ gameNumber: 3, phase: 'PLAYING', trump: { suit: 'S', level: 3 } });
+    check('第一行标题 = 「第3局 · 主牌」', t3 === '第3局 · 主牌', t3);
+    check('主牌未定时报「主牌未定」（不把两个字省掉）',
+        ui.topTitle({ gameNumber: 1, phase: 'BIDDING' }) === '第1局 · 主牌未定');
+    const allPhases = ['DEALING', 'BIDDING', 'BURYING', 'PLAYING', 'TRIBUTE', 'RETURN_TRIBUTE', 'SETTLING'];
+    check('无论什么阶段，第一行都不再出现阶段词',
+        allPhases.every(p => !/发牌中|亮主|扣底|出牌|进贡|还贡|结算中/.test(
+            ui.topTitle({ gameNumber: 2, phase: p, trump: { suit: 'H', level: 5 } }))));
+
+    // (b) 状态三问：三段文字 + 只有"发生过"的才高亮
+    const f0 = ui.roundFactSegments({});
+    check('都没发生时 = 「干锅 否 · 扣王 否 · 进贡 否」',
+        f0.map(x => x.text).join(' · ') === '干锅 否 · 扣王 否 · 进贡 否',
+        f0.map(x => x.text).join(' · '));
+    check('都没发生时三段都不高亮', f0.every(x => x.hot === false));
+
+    const f1 = ui.roundFactSegments({ dryPot: true, jokerBuried: true });
+    check('干锅 + 扣王都发生时两段都高亮、进贡不高亮',
+        f1[0].text === '干锅 是' && f1[0].hot === true
+        && f1[1].text === '扣王 是' && f1[1].hot === true
+        && f1[2].hot === false);
+    check('字段缺失（老快照）不能报成"是"：undefined 不是 true',
+        ui.roundFactSegments({}).every(x => x.hot === false));
+
+    // (c) 「是否进贡」的两个来源：还欠着 / 已经交过
+    check('有待进贡义务 → 进贡 是',
+        ui.roundFactSegments({ pendingTributes: { WEST: { blood: 2, receiver: 'NORTH' } } })[2].hot === true);
+    check('已有进贡流水 → 进贡 是',
+        ui.roundFactSegments({ tributes: [{ payer: 'EAST', receiver: 'SOUTH', cards: ['BJ'] }] })[2].hot === true);
+
+    // (d) 明细行：谁贡给谁、贡了哪几张、还了哪几张
+    const rowsPending = ui.tributeRows({ pendingTributes: { WEST: { blood: 3, receiver: 'NORTH' } } });
+    check('还没交贡：只有一行「待进贡 N 张」，不带牌面',
+        rowsPending.length === 1 && rowsPending[0].text === 'WEST 待进贡 3 张 → NORTH'
+        && rowsPending[0].cards.length === 0, JSON.stringify(rowsPending));
+
+    const rowsPaid = ui.tributeRows({
+        tributes: [{ payer: 'SOUTH', receiver: 'EAST', cards: ['BJ', 'SJ'], returned: ['HK', 'C7'] }],
+    });
+    check('已交已还：两行（进贡 + 还贡），各带两张牌，且标明"(我)"',
+        rowsPaid.length === 2
+        && rowsPaid[0].text === 'SOUTH(我) 进贡 → EAST' && rowsPaid[0].cards.join(',') === 'BJ,SJ'
+        && rowsPaid[1].text === 'EAST 还贡 → SOUTH(我)' && rowsPaid[1].cards.join(',') === 'HK,C7',
+        JSON.stringify(rowsPaid));
+
+    check('还没还贡 → 不出现「还贡」行（不能凭空多一行空的）',
+        ui.tributeRows({ tributes: [{ payer: 'EAST', receiver: 'SOUTH', cards: ['BJ'] }] })
+            .map(r => r.text).join(' / ') === 'EAST 进贡 → SOUTH(我)');
+
+    // (e) 端到端：真跑一遍面板，文案与牌面都得落在节点树上
+    const panelUi = newScoreUi();
+    const snap1 = {
+        gameNumber: 2, phase: 'PLAYING', banker: 'SOUTH', trump: { suit: 'S', level: 3 },
+        trickPoints: { A: 60, B: 135 }, takenPointCards: { B: ['SK', 'H10'] },
+        dryPot: false, jokerBuried: true,
+        tributes: [{ payer: 'EAST', receiver: 'SOUTH', cards: ['BJ', 'SJ'], returned: ['HK', 'C7'] }],
+    };
+    panelUi.renderScoreBar(snap1);
+    const overlay = panelUi.scorePanelNode;
+    check('面板已弹出', !!overlay);
+    const labels = overlay ? collectLabels(overlay) : [];
+    check('面板报出「扣王 是」', labels.includes('扣王 是'), labels.join(' | '));
+    check('面板报出「干锅 否」与「进贡 是」',
+        labels.includes('干锅 否') && labels.includes('进贡 是'));
+    check('面板列出「进贡」「还贡」两行明细',
+        labels.includes('EAST 进贡 → SOUTH(我)') && labels.includes('SOUTH(我) 还贡 → EAST'));
+    // 顶部原本是「闲家已捡分牌 · 共 N 分」，面板扩容后下面又有一个「闲家已捡分牌」段标题
+    // —— 同一句话出现两次。改成：顶部报「本局明细」，分数跟着分牌段走。
+    check('顶部报「本局明细」，分数只出现一次（跟着分牌段）',
+        labels.includes('本局明细')
+        && labels.filter(l => l.indexOf('闲家已捡分牌') >= 0).length === 1
+        && labels.includes('闲家已捡分牌 · 共 135 分'),
+        labels.join(' | '));
+    // 迷你牌是 CardUI 桩返回的普通对象，面板自己的节点都是 FAKE_CC.Node 实例 —— 正好用来数牌
+    const minis = overlay ? overlay.children.filter(c => !(c instanceof FAKE_CC.Node)) : [];
+    check('牌面画全：贡 2 张 + 还 2 张 + 闲家分牌 2 张 = 6 张',
+        minis.length === 6, `实际 ${minis.length} 张`);
+
+    // (f) 签名制：内容没变不重建；只有"本局事实"变了也必须刷新
+    const before = panelUi.scorePanelNode;
+    panelUi.renderScoreBar(snap1);
+    check('快照没变 → 面板不重建（签名制）', panelUi.scorePanelNode === before);
+    panelUi.renderScoreBar({ ...snap1, jokerBuried: false });
+    check('只有「扣王」由是变否 → 面板必须重建（否则内容僵着不更新）',
+        panelUi.scorePanelNode !== before);
+
+    // (g) 没有进贡时不该出现空的"本局进贡 / 还贡"段
+    const plainUi = newScoreUi();
+    plainUi.renderScoreBar({
+        gameNumber: 2, phase: 'PLAYING', banker: 'SOUTH',
+        trickPoints: { B: 5 }, takenPointCards: { B: ['D5'] },
+    });
+    const plainLabels = collectLabels(plainUi.scorePanelNode);
+    check('没有进贡 → 不出现「本局进贡 / 还贡」段，但状态行仍报「进贡 否」',
+        !plainLabels.includes('本局进贡 / 还贡') && plainLabels.includes('进贡 否'),
+        plainLabels.join(' | '));
+
+    // (h) 面板花色图标配色：牌体是近白、面板底板是深蓝，同一支笔的"黑"在两边不能通用。
+    //     ♠/♣ 若沿用 suitColor 的近黑(30,30,30)，贴到面板(26,40,62)上对比度 1.05:1 —— 等于没画。
+    const iconUi = newScoreUi();
+    const iconS = iconUi.panelSuitColor('S');
+    const iconH = iconUi.panelSuitColor('H');
+    check('面板内 ♠/♣ 花色图标必须提亮（不能沿用近黑 30,30,30）',
+        iconS.r > 200 && iconS.g > 200 && iconS.b > 200,
+        `实际 ${iconS.r},${iconS.g},${iconS.b}`);
+    check('面板内 ♥/♦ 花色图标为亮红（语义不变，且不与深蓝底板糊在一起）',
+        iconH.r > 180 && iconH.g < 120 && iconH.b < 120,
+        `实际 ${iconH.r},${iconH.g},${iconH.b}`);
+
+    // (i) 端到端再钉一次：配色**算对了还得真用上**。只测 panelSuitColor 是不够的 ——
+    //     把调用点改回 suitColor(grp.suit)，那个纯函数测试照样绿。
+    const iconEndUi = newScoreUi();
+    suitIconCalls = [];
+    iconEndUi.renderScoreBar({
+        gameNumber: 2, phase: 'PLAYING', banker: 'SOUTH',
+        trickPoints: { B: 15 }, takenPointCards: { B: ['SK', 'HK'] },
+    });
+    const spadeCall = suitIconCalls.find(c => c.suit === 'S');
+    const heartCall = suitIconCalls.find(c => c.suit === 'H');
+    check('面板把提亮配色真正交给了 ♠ 图标（不能"算了不用"退回近黑）',
+        !!spadeCall && !!spadeCall.color && spadeCall.color.r > 200,
+        JSON.stringify(spadeCall));
+    check('面板把亮红配色真正交给了 ♥ 图标',
+        !!heartCall && !!heartCall.color && heartCall.color.r > 180 && heartCall.color.g < 120,
+        JSON.stringify(heartCall));
 }
 
 console.log('=================================================');

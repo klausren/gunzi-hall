@@ -1,7 +1,7 @@
 import { _decorator, Color, Component, game, Graphics, Label, Node, ResolutionPolicy, Tween, tween, UIOpacity, UITransform, Vec3, view } from 'cc';
 import { NetClient } from '../net/NetClient';
 import { describeServerUrl, resolveServerUrl } from '../net/ServerUrl';
-import type { EventMsg, JoinedMsg, SeatName, SnapshotMsgDown } from '../net/Protocol';
+import type { EventMsg, JoinedMsg, SeatName, SnapshotMsgDown, TributeLogMsg } from '../net/Protocol';
 import { addSuitIcon, addTileText, cardFace, createCardNode, createMiniCardNode, createTileNode, drawCardBg, suitColor } from './CardUI';
 
 const { ccclass, property } = _decorator;
@@ -703,6 +703,24 @@ export class TableUI extends Component {
     // ==================== 铭牌附加标记（庄家 / 定主者） ====================
 
     /**
+     * 牌桌标记（"庄"瓦片 + 铭牌金框）用的庄家口径：**以快照为准**。
+     *
+     * <p>为什么不能沿用 {@link #IN_GAME_PHASES} 那套判据：切庄发生在**结算命令**里 ——
+     * 服务端 `setBankerSeat(newBanker)` 之后**立刻** `transitionTo(DEALING)`，
+     * 也就是说新一局的 DEALING / BIDDING 快照里 `banker` 已经是**新庄家**了。
+     * 旧写法把这两个阶段归到"其余"分支去取 `preSettleBanker`（上一局的庄），
+     * 症状正是 Tracy 反馈的：抓分方上台（闲家 ≥120）之后，**下一局开局时"庄"瓦片
+     * 仍挂在原来那个庄家的铭牌旁**，要等到扣底阶段才"跳"过去。
+     *
+     * <p>`preSettleBanker` 只保留给结算面板 —— 面板要按**本局**的庄/抓分队贴标签
+     * （见 renderSettlement），那才是这个缓冲存在的唯一理由，不该外溢到牌桌标记上。
+     * 这里的回退分支只服务"快照还没给出庄家"的场合：第一局亮主前、出锅后的 ROUND_OVER。
+     */
+    private tableBanker(s: SnapshotMsgDown): SeatName | null {
+        return s.banker ?? this.preSettleBanker;
+    }
+
+    /**
      * 给四块铭牌补上"谁是庄家"和"谁定的主"两个标记。
      *
      * <p>为什么需要：原来"庄"只体现在铭牌文字前缀（庄·EAST）与金色边框上，四块小牌子
@@ -710,8 +728,9 @@ export class TableUI extends Component {
      * 什么牌）在亮主窗口关闭之后就再无痕迹，复盘时只能靠回忆。
      */
     private renderSeatBadges(s: SnapshotMsgDown): void {
-        // 结算切庄后 banker 已是下一局的人，沿用"本局庄"（与铭牌金框同一口径）
-        const banker = TableUI.IN_GAME_PHASES.has(s.phase) ? s.banker : this.preSettleBanker;
+        // 牌桌标记以快照为准：新一局的 DEALING / BIDDING 里 banker 已经是新庄家；
+        // preSettleBanker 只留给结算面板 —— 见 tableBanker 的说明。
+        const banker = this.tableBanker(s);
         const rev = s.reveal;
         for (const seat of TableUI.ALL_SEATS) {
             const isBanker = banker === seat;
@@ -780,7 +799,9 @@ export class TableUI extends Component {
         const SIZE = 22;
         const suitTile = (sym: string): Node => {
             const t = createTileNode(SIZE, SIZE, TableUI.TILE_BG, TableUI.TILE_BORDER, 4);
-            if (sym) addSuitIcon(t, sym, 0, 0, 14, suitColor(sym));
+            // 14 → 16：♠/♣ 同为黑色后要靠"尖顶 vs 三圆"区分，14px 时差距偏小；
+            // 22×22 的瓦片放得下 16（四周仍留 3px）
+            if (sym) addSuitIcon(t, sym, 0, 0, 16, suitColor(sym));
             return t;
         };
         const textTile = (txt: string): Node => {
@@ -1244,13 +1265,28 @@ export class TableUI extends Component {
                 + `庄${s.banker ?? '-'} 轮${s.turn ?? '-'} 手牌${(s.yourHand ?? []).length} `
                 + `视口${Math.round(vs.width)}x${Math.round(vs.height)}`);
         }
-        // 第一行 = 「第N局 · 阶段」+ 主牌级数图标。
-        // 不再用文字报"级3 主方块3"（图标一眼可读、更省地方），也不报"庄谁/轮谁"
-        // （铭牌金框 + 呼吸高亮已经在表达，纯属重复）。
-        this.setTopText(`第${s.gameNumber}局 · ${phase}${this.net?.online ? '' : '  ⚠ 离线'}`);
+        // 第一行 = 「第N局 · 主牌」+ 主牌级数图标。
+        // 2026-09-18 Tracy：这行里的「出牌」改成「主牌」，并且**恒定**显示主牌、不再显示
+        // 阶段词。理由：这行是牌桌上最显眼的"标题位"，该回答的是**稳定**信息
+        // （第几局、主牌是什么），而"发牌中/亮主/扣底/出牌/进贡/结算中"是转瞬即逝的
+        // 状态 —— 每隔几秒就换一个词，反而把真正要看的"主牌"挤没了。阶段该知道的时候
+        // 自然会知道：轮到谁，按钮区就是那个阶段的动作（扣底 / 扣王 / 出牌 / 进贡 / 还贡），
+        // 该等谁则由铭牌呼吸高亮表达。
+        this.setTopText(this.topTitle(s) + (this.net?.online ? '' : '  ⚠ 离线'));
         this.setTopTrumpBadge(s.trump ? { suit: s.trump.suit, level: s.trump.level } : null);
         // 第二行 = 闲家（抓分方）得分条
         this.renderScoreBar(s);
+    }
+
+    /**
+     * 第一行标题：**局号 + 主牌**（主牌图标紧跟其后，见 {@link setTopTrumpBadge}）。
+     *
+     * <p>刻意不随阶段变化（2026-09-18 Tracy：「出牌」应改为「主牌」）。主牌未定时报
+     * 「主牌未定」而不是把两个字省掉 —— 发牌/亮主期间这一行总得说明白"为什么后面
+     * 没有那个花色瓦片"，否则玩家会以为图标丢了。
+     */
+    private topTitle(s: SnapshotMsgDown): string {
+        return `第${s.gameNumber}局 · ${s.trump ? '主牌' : '主牌未定'}`;
     }
 
     /** 第一行文字（内容不变时一个字都不动） */
@@ -1430,7 +1466,7 @@ export class TableUI extends Component {
         this.scoreBarNode.active = true;
         const text = `闲家得分 ${info.score}`;
         if (this.scoreCapsuleLabel.string !== text) this.scoreCapsuleLabel.string = text;
-        if (this.scoreExpanded) this.buildScorePanel(info);
+        if (this.scoreExpanded && s) this.buildScorePanel(info, s);
         else this.closeScorePanel();
     }
 
@@ -1454,21 +1490,134 @@ export class TableUI extends Component {
         };
     }
 
+    // ==================== 面板：本局特殊事件（干锅 / 扣王 / 进贡） ====================
+
     /**
-     * 展开面板：按花色列出闲家已收走的分牌（5/10/K）。
+     * 本局三个"特殊事件"事实：**干锅 / 扣王 / 进贡**（2026-09-18 Tracy 要求加进得分面板）。
+     *
+     * <p>三段口径全部读服务端字段，客户端不复算规则：
+     * <ul>
+     *   <li>干锅 = {@code dryPot}（底牌无主花色普通牌，手册 2.3.7）；</li>
+     *   <li>扣王 = {@code jokerBuried}。**不能拿 bottomRevealed 顶替** —— 那个是"底牌摊没
+     *       摊开"的可见性口径：干锅局底牌里本来就带着王（发牌发出来的，手册 2.3.7 专门为
+     *       "干锅底牌王"立规），可见性为真而实际没人扣过王；</li>
+     *   <li>进贡 = 本局有进贡义务（{@code pendingTributes}，还没交）或已有进贡流水
+     *       （{@code tributes}）。</li>
+     * </ul>
+     *
+     * <p>抽成纯函数（不碰节点）是为了能在无 UI 环境下断言 —— 面板要点开、要建一堆节点，
+     * 而"这三句话报得对不对"才是真正会错的地方（见 tools/ui_smoke_test.js 第 27 段）。
+     */
+    private roundFactSegments(s: SnapshotMsgDown | null): { text: string; hot: boolean }[] {
+        const hasTribute = this.tributesOf(s).length > 0
+            || Object.keys(s?.pendingTributes ?? {}).length > 0;
+        return [
+            { text: `干锅 ${s?.dryPot ? '是' : '否'}`, hot: s?.dryPot === true },
+            { text: `扣王 ${s?.jokerBuried ? '是' : '否'}`, hot: s?.jokerBuried === true },
+            { text: `进贡 ${hasTribute ? '是' : '否'}`, hot: hasTribute },
+        ];
+    }
+
+    /**
+     * 本局已完成的进贡流水，按座位固定顺序重排。
+     *
+     * <p>为什么要重排：服务端那份是 Map 序，不值得依赖；而面板走签名制 —— 顺序一变签名
+     * 就变，会白白重建一次整个浮层（还可能让玩家正在点的牌落空）。
+     */
+    private tributesOf(s: SnapshotMsgDown | null): TributeLogMsg[] {
+        const raw = s?.tributes;
+        if (!raw || raw.length === 0) return [];
+        const out: TributeLogMsg[] = [];
+        for (const seat of TableUI.ALL_SEATS) {
+            for (const t of raw) {
+                if (t && t.payer === seat && t.receiver && t.cards) out.push(t);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 进贡 / 还贡明细行：左边一句话、右边一串牌面。
+     *
+     * <p>三种行：`X 进贡 → Y` + 贡牌（已交）、`Y 还贡 → X` + 还牌（没还则整行不出现）、
+     * `X 待进贡 N 张 → Y`（还没交，只有欠的张数、没有牌面）。
+     */
+    private tributeRows(s: SnapshotMsgDown | null): { text: string; cards: string[] }[] {
+        const rows: { text: string; cards: string[] }[] = [];
+        const pending = s?.pendingTributes ?? {};
+        for (const seat of TableUI.ALL_SEATS) {
+            const ob = pending[seat];
+            if (!ob) continue;
+            rows.push({
+                text: `${this.seatText(seat)} 待进贡 ${ob.blood} 张 → ${this.seatText(ob.receiver as SeatName)}`,
+                cards: [],
+            });
+        }
+        for (const t of this.tributesOf(s)) {
+            rows.push({
+                text: `${this.seatText(t.payer)} 进贡 → ${this.seatText(t.receiver)}`,
+                cards: t.cards,
+            });
+            if (t.returned && t.returned.length > 0) {
+                rows.push({
+                    text: `${this.seatText(t.receiver)} 还贡 → ${this.seatText(t.payer)}`,
+                    cards: t.returned,
+                });
+            }
+        }
+        return rows;
+    }
+
+    /** 面板里的座位名：是我自己就补一个「(我)」，一眼对上桌面铭牌 */
+    private seatText(seat: SeatName): string {
+        return seat === this.mySeat ? `${seat}(我)` : seat;
+    }
+
+    /**
+     * 展开面板：**本局都发生了什么**（干锅 / 扣王 / 进贡与还贡明细）+ 闲家已收走的分牌。
      *
      * <p>为什么做成整屏浮层而不是贴着胶囊的下拉：第二行正下方就是对家铭牌与墩牌区，
      * 任何下拉面板都会盖住对家牌面；这里是"我主动要看的明细"，做成遮罩浮层点哪都能关，
      * 既不会长期挡视线，也不必为腾地方重排整个牌桌。
      *
-     * <p>为什么只列分牌：一局整圈牌上百张，铺满屏也看不清；玩家要确认的是
-     * "这些分具体是哪几张、都收在谁手上"。
+     * <p>为什么分牌只列"分牌"：一局整圈牌上百张，铺满屏也看不清；玩家要确认的是
+     * "这些分具体是哪几张、都收在谁手上"。进贡 / 还贡是一次性的少数几张，所以全列。
+     *
+     * <p>高度**按内容自适应**（进贡段与分牌段的行数都是可变的）：固定高度要么空一大片，
+     * 要么把内容挤出面板底边。所以先算需要多高，再画底板，最后自上而下铺内容。
      */
-    private buildScorePanel(info: { score: number; cards: string[] }): void {
-        const sig = `${info.score}|${info.cards.join(',')}`;
+    private buildScorePanel(info: { score: number; cards: string[] }, s: SnapshotMsgDown): void {
+        const segs = this.roundFactSegments(s);
+        const tRows = this.tributeRows(s);
+
+        // 分花色成组：每组左边一个花色图标，右边按点数从大到小（K > 10 > 5）列出
+        const groups: { suit: string; cards: string[] }[] = [];
+        for (const suit of TableUI.SIDE_ORDER) {
+            const of = info.cards.filter(c => c[0] === suit);
+            if (of.length === 0) continue;
+            of.sort((a, b) => parseInt(b.slice(1), 10) - parseInt(a.slice(1), 10));
+            groups.push({ suit, cards: of });
+        }
+
+        // 签名必须带上"本局事实"：面板开着的时候扣王 / 进贡都可能发生（而分牌还没变），
+        // 少这几项就会出现"面板僵着不更新"的假象。
+        const sig = [
+            info.score, info.cards.join(','),
+            segs.map(x => `${x.text}${x.hot ? '!' : ''}`).join(';'),
+            tRows.map(r => `${r.text}:${r.cards.join('-')}`).join(';'),
+        ].join('|');
         if (this.scorePanelNode && sig === this.scorePanelSig) return;
         this.closeScorePanel();
         this.scorePanelSig = sig;
+
+        // ---- 几何：先按内容算高 ----
+        const PW = 880;
+        const ROW_H = 52;                       // 迷你牌高 46 + 6 间距，再挤就叠上了
+        let need = 34 + 30 + 18 + 22;           // 标题 / 状态行 / 分隔线 / 段前留白
+        if (tRows.length > 0) need += 26 + tRows.length * ROW_H + 4 + 22;
+        need += 26 + Math.max(groups.length, 1) * ROW_H;
+        need += 40;                             // 底部说明 + 底边内边距
+        const PH = Math.max(260, Math.min(650, need));
 
         const overlay = new Node('scorepanel');
         overlay.layer = 1 << 25;
@@ -1476,7 +1625,6 @@ export class TableUI extends Component {
         const g = overlay.addComponent(Graphics);
         g.fillColor = new Color(0, 0, 0, 120);
         g.fillRect(-640, -360, 1280, 720);
-        const PW = 700, PH = 260;
         g.fillColor = new Color(26, 40, 62, 252);
         g.roundRect(-PW / 2, -PH / 2 - 10, PW, PH, 16);
         g.fill();
@@ -1492,40 +1640,84 @@ export class TableUI extends Component {
             this.closeScorePanel();
         });
 
-        this.addPanelText(overlay, `闲家已捡分牌 · 共 ${info.score} 分`, 0, PH / 2 - 32, 22,
-            new Color(255, 214, 130, 255), true);
+        // 分隔线走**独立节点**：Cocos 的 Graphics 路径会累积，在同一支笔上再 stroke 一次
+        // 会把面板外框按新的线宽/颜色重描一遍，边框会花。
+        const divNode = new Node('divider');
+        divNode.layer = 1 << 25;
+        divNode.addComponent(UITransform).setContentSize(PW, PH);
+        const dg = divNode.addComponent(Graphics);
+        dg.lineWidth = 1;
+        dg.strokeColor = new Color(206, 156, 84, 90);
+        overlay.addChild(divNode);
+        const divider = (yy: number): void => {
+            dg.moveTo(-PW / 2 + 26, yy);
+            dg.lineTo(PW / 2 - 26, yy);
+            dg.stroke();
+        };
 
-        // 分花色成组：每组左边一个花色图标，右边按点数从大到小（K > 10 > 5）列出
-        const groups: { suit: string; cards: string[] }[] = [];
-        for (const s of TableUI.SIDE_ORDER) {
-            const of = info.cards.filter(c => c[0] === s);
-            if (of.length === 0) continue;
-            of.sort((a, b) => parseInt(b.slice(1), 10) - parseInt(a.slice(1), 10));
-            groups.push({ suit: s, cards: of });
+        const gold = new Color(255, 214, 130, 255);
+        const sub = new Color(170, 200, 220, 255);
+
+        let y = PH / 2 - 34;
+        this.addPanelText(overlay, '本局明细', 0, y, 22, gold, true);
+        y -= 30;
+
+        // 状态行：三段并排居中。"发生过"的那段用暖色加粗，其余灰蓝 —— 一眼扫过就知道
+        // 本局有没有事，不必逐字读。
+        const widths = segs.map(x => TableUI.estimateTextWidth(x.text, 17));
+        const dotGap = 20;
+        const totalW = widths.reduce((a, b) => a + b, 0) + dotGap * (segs.length - 1);
+        let sx = -totalW / 2;
+        for (let i = 0; i < segs.length; i++) {
+            this.addPanelText(overlay, segs[i].text, sx + widths[i] / 2, y, 17,
+                segs[i].hot ? new Color(255, 205, 100, 255) : new Color(150, 165, 180, 255),
+                segs[i].hot);
+            sx += widths[i] + dotGap;
         }
-        if (groups.length === 0) {
-            this.addPanelText(overlay, '闲家还没有收到分牌', 0, 0, 20,
-                new Color(180, 190, 200, 255), false);
-        } else {
-            // 两列 × 两行摆放：每门一行（左边一个花色图标 + 该门的分牌，从大到小）。
-            // 坐标直接算在面板坐标系里（不加中间容器）：单门最多 9 张（三副牌的 5/10/K），
-            // 9 张 × 30 间距 = 240，两列各 330 宽，正好落在 700 宽的面板内。
-            const COL_W = 330, ROW_H = 58;
-            const startX = -PW / 2 + 20;
-            const startY = PH / 2 - 76;
-            for (let i = 0; i < groups.length; i++) {
-                const col = Math.floor(i / 2), row = i % 2;
-                const gx = startX + col * COL_W;
-                const gy = startY - row * ROW_H;
-                addSuitIcon(overlay, groups[i].suit, gx + 10, gy, 18, suitColor(groups[i].suit));
-                for (let k = 0; k < groups[i].cards.length; k++) {
-                    const card = createMiniCardNode(groups[i].cards[k]);
-                    card.setPosition(gx + 36 + k * 30, gy, 0);
+        y -= 18;
+        divider(y);
+        y -= 22;
+
+        // ---- 本局进贡 / 还贡（有才显示） ----
+        if (tRows.length > 0) {
+            this.addPanelText(overlay, '本局进贡 / 还贡', 0, y, 16, sub, false);
+            y -= 26;
+            for (const row of tRows) {
+                this.addPanelRowText(overlay, row.text, -PW / 2 + 34, y, 17,
+                    new Color(235, 235, 235, 255), 230);
+                for (let k = 0; k < row.cards.length; k++) {
+                    const card = createMiniCardNode(row.cards[k]);
+                    card.setPosition(-PW / 2 + 300 + k * 34, y, 0);
                     overlay.addChild(card);
                 }
+                y -= ROW_H;
+            }
+            y -= 4;
+            divider(y);
+            y -= 22;
+        }
+
+        // ---- 闲家已捡的分牌（一行一门） ----
+        this.addPanelText(overlay, `闲家已捡分牌 · 共 ${info.score} 分`, 0, y, 16, sub, false);
+        y -= 26;
+        if (groups.length === 0) {
+            this.addPanelText(overlay, '闲家还没有收到分牌', 0, y, 18,
+                new Color(180, 190, 200, 255), false);
+        } else {
+            // 一行一门：左边花色图标，右边分牌从大到小。单门最多 9 张（三副牌的 5/10/K），
+            // 9 × 34 = 306，加上标签位也远在 880 宽之内。
+            for (const grp of groups) {
+                addSuitIcon(overlay, grp.suit, -PW / 2 + 44, y, 18, this.panelSuitColor(grp.suit));
+                for (let k = 0; k < grp.cards.length; k++) {
+                    const card = createMiniCardNode(grp.cards[k]);
+                    card.setPosition(-PW / 2 + 74 + k * 34, y, 0);
+                    overlay.addChild(card);
+                }
+                y -= ROW_H;
             }
         }
-        this.addPanelText(overlay, '点击任意处关闭', 0, -PH / 2 + 18, 14,
+
+        this.addPanelText(overlay, '点击任意处收起', 0, -PH / 2 + 20, 14,
             new Color(160, 170, 180, 255), false);
 
         // 弹入：缩放 0.85→1 + 淡入（与结算面板同一套动效语汇）
@@ -1544,6 +1736,20 @@ export class TableUI extends Component {
         this.scorePanelNode.destroy();
         this.scorePanelNode = null;
         this.scorePanelSig = '';
+    }
+
+    /**
+     * 面板内的花色图标配色：**不能直接用 {@link suitColor}**。
+     *
+     * <p>牌桌上的牌体是近白色（253,253,252），♠/♣ 用近黑（30,30,30）在牌面上清清楚楚；
+     * 但面板底板是深蓝（26,40,62），近黑图标贴上去对比度只有 1.05:1 —— 等于没画
+     * （2026-09-18 自查发现）。所以面板内换成"提亮版"：♥/♦ 用亮红、♠/♣ 用浅灰白。
+     * 只改这个浮层的取值，牌桌与手牌上的花色一律照旧，避免误伤已验收的牌面。
+     */
+    private panelSuitColor(suit: string): Color {
+        return (suit === 'H' || suit === 'D')
+            ? new Color(232, 84, 84, 255)      // 亮红：深蓝底上够扎眼
+            : new Color(226, 232, 240, 255);   // 浅灰白：♠/♣ 的"黑"在深底上要反过来提亮
     }
 
     /** 浮层面板内的一行文字（子节点，避开单 UIRenderer 限制） */
@@ -1565,17 +1771,42 @@ export class TableUI extends Component {
         parent.addChild(n);
     }
 
+    /**
+     * 浮层面板内的**左对齐**一行（行首钉在 x0，不居中）。
+     *
+     * <p>只有进贡/还贡那几行需要它：它们左边是"谁贡给谁"、右边要跟一串牌面，用居中的
+     * {@link addPanelText} 会把文字压到牌面上。Cocos 的 Label 按锚点居中摆放，所以
+     * 想让文字从 x0 开始，节点 x 得落在「x0 + maxW/2」。
+     */
+    private addPanelRowText(parent: Node, text: string, x0: number, y: number,
+                           size: number, color: Color, maxW: number): void {
+        const n = new Node('rowtext');
+        n.layer = 1 << 25;
+        n.addComponent(UITransform).setContentSize(maxW, size + 8);
+        const l = n.addComponent(Label);
+        l.string = text;
+        l.fontSize = size;
+        l.lineHeight = size + 4;
+        l.color = color;
+        l.isBold = false;
+        l.useSystemFont = true;
+        l.horizontalAlign = Label.HorizontalAlign.LEFT;
+        l.verticalAlign = Label.VerticalAlign.CENTER;
+        n.setPosition(x0 + maxW / 2, y, 0);
+        parent.addChild(n);
+    }
+
     // ==================== 墩牌（差量动画） ====================
 
     private renderTrick(): void {
         const s = this.snap;
         if (!s) return;
 
-        // 铭牌：座位名 + 余牌数（结算切庄后沿用本局庄）。
+        // 铭牌：座位名 + 余牌数（庄家口径见 tableBanker —— 以快照为准）。
         // "庄"不再写进文字里：文字版"庄·EAST(32)"一桌四块牌子长得几乎一样，
         // 找庄家得逐字读 → 改成铭牌上方/旁边的金色瓦片标记（见 renderSeatBadges），
         // 铭牌本身仍保留金色边框，双重提示。
-        const bankerNow = TableUI.IN_GAME_PHASES.has(s.phase) ? s.banker : this.preSettleBanker;
+        const bankerNow = this.tableBanker(s);
         for (const seat of TableUI.ALL_SEATS) {
             const cnt = s.hands?.[seat];
             const name = seat === this.mySeat ? '我' : seat;

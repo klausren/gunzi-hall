@@ -115,6 +115,13 @@ public final class BuryBottomCommand extends AbstractGameCommand {
         boolean hasJoker = cards.stream().anyMatch(Card::isJoker);
         boolean hasPoints = cards.stream().anyMatch(c -> c.points() > 0);
         room.setBottomRevealed(hasJoker); // 2.3.3：扣王时底牌必须亮给所有人看
+        if (hasJoker && !dryPot) {
+            // 本局"有人扣王"这个**事实**（供结算后的面板回看）。与可见性字段分开记，
+            // 而且必须排掉干锅：干锅是原样扣回，底牌里那几张王是**发牌发出来的**
+            // （手册 2.3.7 专门为"干锅底牌王"立规：不算血、不追加升级），没人扣过它们。
+            // 漏掉这层判断，干锅局就会被面板报成"本局扣王 是"。
+            room.setJokerBuried(true);
+        }
 
         if (!dryPot && !hasPoints && othersHoldJoker(room, bankerSeat)) {
             // 2.3.5：庄家扣完底牌后，其他玩家也可以在底牌中扣王 —— 依次询问三家

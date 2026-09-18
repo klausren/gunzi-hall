@@ -100,6 +100,73 @@ MUTATIONS = [
         'return code; // MUT',
         ['同码的两张王能各自选中'],
     ),
+    # ---- 针对 2026-09-18 Tracy 反馈的"抓分方上台后庄家标记不切" ----
+    # 这条是那个 bug 的**还原**：牌桌标记的庄家口径退回旧写法，
+    # DEALING / BIDDING（新一局的发牌与亮主）会落到"其余"分支去取 preSettleBanker
+    # （上一局的庄）→ 下一局开局时"庄"瓦片仍挂在原来的庄家身上，扣底才跳过去。
+    (
+        'M14', '牌桌庄家口径退回"DEALING/BIDDING 用 preSettleBanker"（下一局庄瓦片不切）',
+        'return s.banker ?? this.preSettleBanker;',
+        'return TableUI.IN_GAME_PHASES.has(s.phase)'
+        ' ? s.banker : this.preSettleBanker; // MUT',
+        ['【回归】下一局发牌：庄瓦片必须跟到新庄 NORTH',
+         '下一局亮主：庄瓦片仍在 NORTH'],
+    ),
+    # ---- 以下五条针对 2026-09-18 的"第一行改报主牌 + 面板补本局事实" ----
+    (
+        'M15', '第一行退回"局号 + 阶段词"（出牌/亮主/扣底又回来占标题位）',
+        "return `第${s.gameNumber}局 · ${s.trump ? '主牌' : '主牌未定'}`;",
+        "return `第${s.gameNumber}局 · ${TableUI.PHASE_TEXT[s.phase] ?? s.phase}`; // MUT",
+        ['第一行标题 = 「第3局 · 主牌」', '无论什么阶段，第一行都不再出现阶段词'],
+    ),
+    (
+        'M16', '"是否扣王"的高亮拿可见性字段顶替（干锅局会误报成扣王）',
+        'hot: s?.jokerBuried === true',
+        'hot: s?.bottomRevealed === true // MUT',
+        ['干锅 + 扣王都发生时两段都高亮'],
+    ),
+    (
+        'M17', '"是否扣王"的文案拿可见性字段顶替（面板会报"扣王 否"）',
+        "text: `扣王 ${s?.jokerBuried ? '是' : '否'}`",
+        "text: `扣王 ${s?.bottomRevealed ? '是' : '否'}` // MUT",
+        ['面板报出「扣王 是」'],
+    ),
+    (
+        'M18', '进贡明细只列贡牌、不列还贡牌',
+        '            if (t.returned && t.returned.length > 0) {',
+        '            if (false) { // MUT',
+        ['已交已还：两行（进贡 + 还贡）', '面板列出「进贡」「还贡」两行明细'],
+    ),
+    (
+        'M19', '待进贡（还没交）的那一行不画（面板只报"进贡 是"却看不到欠谁多少）',
+        '            const ob = pending[seat];\n            if (!ob) continue;',
+        '            const ob = pending[seat];\n            if (true) continue; // MUT',
+        ['还没交贡：只有一行「待进贡 N 张」，不带牌面'],
+    ),
+    (
+        'M20', '面板内 ♠/♣ 花色图标退回 suitColor 的近黑（深蓝底上等于没画）',
+        '            : new Color(226, 232, 240, 255);   // 浅灰白：♠/♣ 的"黑"在深底上要反过来提亮',
+        '            : new Color(30, 30, 30, 255); // MUT',
+        ['面板内 ♠/♣ 花色图标必须提亮'],
+    ),
+    (
+        'M21', '面板内 ♥/♦ 花色图标丢掉红色语义（也变成浅灰白）',
+        '            ? new Color(232, 84, 84, 255)      // 亮红：深蓝底上够扎眼',
+        '            ? new Color(226, 232, 240, 255)  // MUT',
+        ['面板内 ♥/♦ 花色图标为亮红'],
+    ),
+    (
+        'M22', '配色算对了却忘了用：调用点退回 suitColor(grp.suit)',
+        '                addSuitIcon(overlay, grp.suit, -PW / 2 + 44, y, 18, this.panelSuitColor(grp.suit));',
+        '                addSuitIcon(overlay, grp.suit, -PW / 2 + 44, y, 18, suitColor(grp.suit)); // MUT',
+        ['面板把提亮配色真正交给了 ♠ 图标'],
+    ),
+    (
+        'M23', '面板顶部与分牌段标题重复（同一句「闲家已捡分牌」出现两次）',
+        "        this.addPanelText(overlay, '本局明细', 0, y, 22, gold, true);",
+        "        this.addPanelText(overlay, `闲家已捡分牌 · 共 ${info.score} 分`, 0, y, 22, gold, true); // MUT",
+        ['顶部报「本局明细」'],
+    ),
 ]
 
 
@@ -119,6 +186,7 @@ def main():
     MUT_DIR.mkdir(parents=True, exist_ok=True)
     original = SRC.read_text(encoding='utf-8')
     bad = 0
+    broken = 0
     for mid, desc, old, new, expects in MUTATIONS:
         if only and mid not in only:
             continue
@@ -126,10 +194,25 @@ def main():
             print(f'  [SKIP] {mid} 原文没找到，可能实现已变：{old[:50]}')
             bad += 1
             continue
-        target = MUT_DIR / f'{mid}.ts'
+        # **固定同一个临时文件名**（每次覆盖写），不要每条变异建一个再删一个：
+        # 2026-09-18 实测踩过 —— 一轮全表 20+ 次 unlink 会撞上环境的"批量删除需确认"阈值，
+        # 脚本在第 3 条变异上就被打断（exit=1，日志停在 M2），而看起来像"测试有问题"。
+        target = MUT_DIR / '_mutant.ts'
         target.write_text(original.replace(old, new, 1), encoding='utf-8')
         out = run_test(target)
         reds = [line.strip() for line in out.splitlines() if '[FAIL]' in line]
+        ran = any('[OK]' in line for line in out.splitlines())
+        if not reds and not ran:
+            # 变异体**一条断言都没跑**：这多半是 old/new 串写错，把文件改成了语法错误。
+            # 既不能算"成功变红"，也不能算"测试有漏洞" —— 必须单独报出来。
+            # 不区分的话，一个笔误就会以"绿"的形态混过去，整张变异表就全不可信了
+            # （2026-09-18 踩过：M21 的 new 串多带一个分号，就是这样假绿的）。
+            print(f'  [BROKEN] {mid} {desc}')
+            print('           变异体没跑起来（多半语法错误），请检查 old/new 串是否与源码逐字一致')
+            for line in out.splitlines()[-4:]:
+                print(f'           {line.strip()}')
+            broken += 1
+            continue
         ok = all(any(k in r for r in reds) for k in expects)
         hit = sum(1 for k in expects if any(k in r for r in reds))
         print(f'  [{"RED" if ok else "GREEN!"}] {mid} {desc}')
@@ -138,11 +221,16 @@ def main():
             print(f'         {r}')
         if not ok:
             bad += 1
-        target.unlink(missing_ok=True)
-    shutil.rmtree(MUT_DIR, ignore_errors=True)
+    # 刻意**不清理**这个临时文件：变异体每轮覆盖写在同一个 `_mutant.ts` 上，本来就只有一份；
+    # 再为"收尾"多删一次，只会继续消耗环境的删除配额（这个目录是 Cocos 的 temp，不进版本库）。
     print('=' * 49)
-    print('全部变异都成功变红' if bad == 0 else f'{bad} 个变异没被发现（测试有漏洞）')
-    return 1 if bad else 0
+    if broken:
+        print(f'{broken} 个变异体没编译过（BROKEN），结果不可信，请先修 old/new 串')
+    if bad:
+        print(f'{bad} 个变异没被发现（测试有漏洞）')
+    if not bad and not broken:
+        print('全部变异都成功变红')
+    return 1 if (bad or broken) else 0
 
 
 if __name__ == '__main__':

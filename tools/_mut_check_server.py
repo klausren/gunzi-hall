@@ -118,17 +118,78 @@ MUTATIONS = [
         '        this.bottomRevealed = false; // MUT',
         ['anyPick_keepsBottomPublicAfterWindowCloses'],
     ),
+    # ---- 以下针对"抓分方上台后的接庄方向"（2026-09-18 与 Tracy 确认：下家接庄）----
+    (
+        'S11', '接庄方向退回"上家接庄" → 下一局庄家会挂到错的那一家',
+        f'{DOMAIN}/action/SettleRoundCommand.java',
+        'Seat newBanker = result.attackerTakesBank() ? bankerSeat.next() : bankerSeat;',
+        'Seat newBanker = result.attackerTakesBank() ? bankerSeat.previous() : bankerSeat; // MUT',
+        # 前一条是四座位逐一钉死方向的专项用例；后两条是原先就存在的
+        # 结算/进贡用例（它们的期望座位也跟着方向一起翻了）。
+        ['attackerTakesBank_newBankerIsOriginalBankersNextSeat',
+         'attackerReaches120Defended_threeSmallJokerBottom_bankerPaysTribute',
+         'highScoreBankerPaysScoreTribute'],
+    ),
+    # ---- 以下五条针对 2026-09-18 的"干锅 / 扣王 / 进贡"三项本局事实（面板数据源）----
+    (
+        'S12', '干锅局也把底牌里的王算成"有人扣王"（漏掉 !dryPot 守卫）',
+        f'{DOMAIN}/action/BuryBottomCommand.java',
+        'if (hasJoker && !dryPot) {',
+        'if (hasJoker) { // MUT',
+        ['dryPotWithJokerInBottom_isNotAJokerBury'],
+    ),
+    (
+        'S13', '快照拿"底牌摊没摊开"顶替"本局是否扣王"（干锅带王时会误报）',
+        f'{ROOM}/RoomActor.java',
+        'm.put("jokerBuried", room.isJokerBuried());',
+        'm.put("jokerBuried", room.isBottomRevealed()); // MUT',
+        ['dryPotWithJokerInBottom_isNotAJokerBury'],
+    ),
+    (
+        'S14', '还贡只记得"还过了"，不记还了哪几张（面板列不出还贡牌）',
+        f'{DOMAIN}/room/GameRoom.java',
+        '        tributeReturned.add(payer);\n'
+        '        tributeReturnedCards.put(payer, List.copyOf(cards));',
+        '        tributeReturned.add(payer); // MUT',
+        ['tributeAndReturnCardsAreArchivedForPanel',
+         'tributeLogCarriesPayerReceiverAndBothCardSets'],
+    ),
+    (
+        'S15', '进贡流水不写收贡人（面板讲不清"谁贡给了谁"）',
+        f'{ROOM}/RoomActor.java',
+        '            t.put("receiver", receiver.name());',
+        '            t.put("receiver", payer.name()); // MUT',
+        ['tributeLogCarriesPayerReceiverAndBothCardSets'],
+    ),
+    (
+        'S16', '开新局不清"本局是否扣王"（上一局的扣王顺着局号带到下一局）',
+        f'{DOMAIN}/room/GameRoom.java',
+        '        bottomRevealed = false;\n'
+        '        jokerBuried = false;',
+        '        bottomRevealed = false; // MUT: 故意不清 jokerBuried',
+        ['bankerBuriesJoker_factIsTrue_andClearedNextRound'],
+    ),
 ]
 
-TEST_CLASSES = 'PickBottomJokerCommandTest,BottomRevealTest,TimeoutTrustTest'
+TEST_CLASSES = ('PickBottomJokerCommandTest,BottomRevealTest,TimeoutTrustTest,'
+                'SettleRoundCommandTest,RoundFactsSnapshotTest,TributeFlowTest')
 
 
 def mvn_test(extra_env=None):
     env = dict(os.environ)
     if extra_env:
         env.update(extra_env)
-    args = [MVN, '-o', '-pl', 'game-domain,game-room', '-am', 'clean', 'test',
-            f'-Dtest={TEST_CLASSES}', '-Dsurefire.failIfNoSpecifiedTests=false']
+    # `-Dmaven.test.failure.ignore=true` 是**必需**的，踩过两次才找对：
+    # 变异体一旦让上游 game-domain 的用例失败，Maven 默认就收工了，game-room 的测试
+    # **根本不跑** —— 期望里写了 room 侧用例的变异（如 S14）就永远不可能变红。
+    #  ✗ 只用 `-fae`：它的语义是"到末尾再失败"，而 game-room **依赖**了失败的 game-domain，
+    #     Maven 会把整个下游模块直接跳过 —— 实测仍然不跑（S14 依旧 [GREEN!]）。
+    #  ✓ 忽略"测试失败导致构建失败"：两个模块的测试都会跑完，我们本来就从 surefire 的
+    #     `[ERROR] XxxTest.yyy:NNN` 行里读结果，不依赖退出码。
+    #  编译错误仍会给出 BUILD FAILURE —— BROKEN 判定不受影响。
+    args = [MVN, '-o', '-pl', 'game-domain,game-room', '-am', '-fae', 'clean', 'test',
+            f'-Dtest={TEST_CLASSES}', '-Dsurefire.failIfNoSpecifiedTests=false',
+            '-Dmaven.test.failure.ignore=true']
     p = subprocess.run(args, capture_output=True, text=True, encoding='utf-8',
                        errors='replace', cwd=str(SERVER), env=env)
     return p.stdout + p.stderr
@@ -142,6 +203,7 @@ def failures(out):
 
 def main():
     bad = 0
+    broken = 0
     # 可选：只跑指定编号（`python _mut_check_server.py S8 S10`）——
     # 改完锚点/期望后快速复验，不必等全表跑完 10 分钟。
     only = {a.upper() for a in sys.argv[1:]}
@@ -158,6 +220,17 @@ def main():
             path.write_text(original.replace(old, new, 1), encoding='utf-8')
             out = mvn_test()
             reds = failures(out)
+            if not reds and 'BUILD FAILURE' in out:
+                # 编译不过的变异体**一条测试都没跑**，既不是"成功变红"也不是"测试有漏洞"。
+                # 不单独报出来，它就会以"绿"的样子混过整张表（2026-09-18 在客户端表上
+                # 被 M21 的一个多余分号骗过一次，见 tools/_mut_check.py 同处注释）。
+                print(f'  [BROKEN] {mid} {desc}')
+                print('           变异体没编译过（BUILD FAILURE 且无测试失败），'
+                      '请检查 old/new 串')
+                for line in [l for l in out.splitlines() if '[ERROR]' in l][:4]:
+                    print('           ' + line.strip())
+                broken += 1
+                continue
             hit = [k for k in expects if any(k in r for r in reds)]
             ok = len(hit) == len(expects)
             print(f'  [{"RED" if ok else "GREEN!"}] {mid} {desc}')
@@ -169,12 +242,11 @@ def main():
                 print(f'         缺：{[k for k in expects if k not in hit]}')
                 bad += 1
         finally:
-            path.write_text(original, encoding='utf-8')   # 先恢复源码
-            # 再把变异产物的 class 删掉，杜绝"源码恢复了但字节码还是坏的"
-            cls_dir = SERVER / rel.split('/src/main/java/')[0] / 'target/classes'
-            for cls in cls_dir.rglob('*.class'):
-                if cls.stem == path.stem:
-                    cls.unlink()
+            path.write_text(original, encoding='utf-8')   # 恢复源码
+            # **不再手工删变异 .class**：mvn_test 每条都跑 `clean test`，target/classes 会被整个
+            # 重建，"源码恢复了但字节码还是坏的"这个隐患已经由 clean 兜住。手工 unlink 反而有害 ——
+            # 2026-09-18 实测：全表 16 条 = 16 次删除，撞上环境的"批量删除需确认"阈值，
+            # 脚本在 S12 收尾时被拦下，S13-S16 根本没跑到，且报错长得像测试脚本自身有问题。
 
     print('=' * 49)
     print('最后跑一次干净全量，确认源码恢复后是绿的 ...')
@@ -188,9 +260,11 @@ def main():
                 print('  ' + line.strip())
 
     print('=' * 49)
-    print('全部变异都成功变红，且恢复后全绿' if bad == 0
+    if broken:
+        print(f'{broken} 个变异体没编译过（BROKEN），这张表的结果不可信，请先修 old/new 串')
+    print('全部变异都成功变红，且恢复后全绿' if (bad == 0 and broken == 0)
           else f'{bad} 处有问题（测试有漏洞 或 源码没恢复干净）')
-    return 1 if bad else 0
+    return 1 if (bad or broken) else 0
 
 
 if __name__ == '__main__':

@@ -94,8 +94,10 @@ public final class RoomActor {
     // 亮王轮转状态（编排层私有，不入领域）
     private Seat bidTurn = Seat.NORTH;
     private int bidPasses = 0;
-    // 进贡方向（payer → 收贡人），编排层在进贡时捕获
-    private final EnumMap<Seat, Seat> tributeReceiver = new EnumMap<>(Seat.class);
+    // 【已移除】原先这里存一份"进贡方向（payer → 收贡人）"，只在 bot/托管路径写入。
+    // 真人自己交贡时它没有记录，只能兜底成"庄家"，而一局可能同时存在两笔进贡
+    // （收贡人不同）→ 会点错人还贡。现在一律问 GameRoom.tributeReceivers()，
+    // 那份记录由 recordTribute 在**所有**路径上留档，不会漏。
 
     private boolean started = false;
     private boolean stuck = false;
@@ -621,7 +623,6 @@ public final class RoomActor {
             if (isHuman(payer) && seatOnline(payer)) {
                 return false; // 等真人交贡
             }
-            tributeReceiver.put(payer, ob.receiver());
             doTribute(payer, ob.bloodCount());
             return true;
         }
@@ -631,7 +632,11 @@ public final class RoomActor {
                 continue;
             }
             Seat payer = e.getKey();
-            Seat receiverSeat = tributeReceiver.getOrDefault(payer,
+            // 收贡人一律问领域层（recordTribute 时留的档）。以前这里读的是本类自己那份
+            // 只在 bot 路径写入的映射：真人交贡时它没有记录，只能兜底成"庄家"——
+            // 而一局可能同时有两笔进贡（收贡人各不相同），兜底会点错人还贡，
+            // 对方手里没有那些牌 → 命令反复失败 → 房间被判 stuck。
+            Seat receiverSeat = room.tributeReceivers().getOrDefault(payer,
                     room.bankerSeat().orElse(Seat.NORTH));
             if (isHuman(receiverSeat) && seatOnline(receiverSeat)) {
                 return false; // 等真人还贡
@@ -879,7 +884,7 @@ public final class RoomActor {
                     if (room.isTributeReturned(e.getKey())) {
                         continue;
                     }
-                    Seat receiver = tributeReceiver.getOrDefault(e.getKey(),
+                    Seat receiver = room.tributeReceivers().getOrDefault(e.getKey(),
                             room.bankerSeat().orElse(Seat.NORTH));
                     if (isHuman(receiver)) {
                         return receiver;
@@ -932,7 +937,7 @@ public final class RoomActor {
                             if (room.isTributeReturned(e.getKey())) {
                                 continue;
                             }
-                            Seat receiver = tributeReceiver.getOrDefault(e.getKey(),
+                            Seat receiver = room.tributeReceivers().getOrDefault(e.getKey(),
                                     room.bankerSeat().orElse(Seat.NORTH));
                             if (receiver == waiter) {
                                 doReturnTribute(receiver, e.getKey(), e.getValue().size());
@@ -1072,6 +1077,10 @@ public final class RoomActor {
         m.put("banker", room.bankerSeat().map(Seat::name).orElse(null));
         m.put("turn", room.turnSeat().map(Seat::name).orElse(null));
         m.put("dryPot", room.isDryPot());
+        // 本局有没有人扣王（2.3.3 庄家 / 2.3.5 他人）。与 bottomRevealed 是两回事：
+        // 那个是"底牌摊没摊开"的可见性口径，这个是**事实**口径 —— 面板要报给玩家的是事实，
+        // 干锅局底牌若本来就带着王（发牌发出来的）不算"扣"。
+        m.put("jokerBuried", room.isJokerBuried());
         // ---- 底牌公开（手册 2.3.1 ~ 2.3.8） ----
         // 【口径说明】手册 2.3.1 写的是"发牌或反主结束后公开"，落到实现里取的是
         // **进入扣底（庄家收底）那一刻**：收底之前这 6 张谁都没碰过，提前摊给所有人看
@@ -1183,6 +1192,27 @@ public final class RoomActor {
         room.pendingTributes().forEach((payer, ob) -> tributes.put(payer.name(),
                 Map.of("blood", ob.bloodCount(), "receiver", ob.receiver().name())));
         m.put("pendingTributes", tributes);
+        // 本局**已完成**的进贡流水：谁贡给谁、贡了哪几张、还贡还了哪几张。
+        // 客户端「闲家得分」展开面板要按这两条显示明细（进贡/还贡的牌都是什么），
+        // 而 pendingTributes 只说明"欠着多少血"，不含牌面。
+        // 进贡与还贡都是**公开动作**（真实牌桌上就是摊在桌面上的），不存在泄密问题；
+        // 但底牌那类的机密字段不受影响 —— 这里只放贡/还的那几张。
+        List<Map<String, Object>> tributeLog = new ArrayList<>();
+        room.tributeReceived().forEach((payer, cards) -> {
+            Map<String, Object> t = new LinkedHashMap<>();
+            t.put("payer", payer.name());
+            // 兜底取"进贡人的下家"：手册规定进贡人 = 收贡人的上家（Seat.next 即下家），
+            // 正常情况下 recordTribute 已留档，走不到这里。
+            Seat receiver = room.tributeReceivers().getOrDefault(payer, payer.next());
+            t.put("receiver", receiver.name());
+            t.put("cards", CardCodec.encodeAll(cards));
+            List<Card> returned = room.tributeReturnedCards().get(payer);
+            if (returned != null) {
+                t.put("returned", CardCodec.encodeAll(returned));
+            }
+            tributeLog.add(t);
+        });
+        m.put("tributes", tributeLog);
         Optional<RoundSettlement.Result> settle = room.lastSettlement();
         if (settle.isPresent()) {
             RoundSettlement.Result s = settle.get();

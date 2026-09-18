@@ -52,7 +52,7 @@ public final class ReturnTributeCommand extends AbstractGameCommand {
 
         com.gunzihall.domain.card.Cards.removeCopies(receiver.hand(), cards);
         room.playerAt(payeeSeat).hand().addAll(cards);
-        room.markTributeReturned(payeeSeat);
+        room.markTributeReturned(payeeSeat, cards);
 
         if (room.allTributesReturned()) {
             // 干锅由 enterBuryingPhase() 统一拦截（原样扣回 → 直接 PLAYING）
