@@ -10,8 +10,15 @@ import subprocess
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-SRC = REPO / 'client/assets/scripts/ui/TableUI.ts'
+TABLE_UI_REL = 'client/assets/scripts/ui/TableUI.ts'
+NET_CLIENT_REL = 'client/assets/scripts/net/NetClient.ts'
+SRC = REPO / TABLE_UI_REL
 MUT_DIR = REPO / 'client/temp/mut'
+# 源文件 -> 测试读取该副本所用的环境变量（ui_smoke_test.js 里对应 GUNZI_* 变量）
+ENV_KEY_BY_FILE = {
+    TABLE_UI_REL: 'GUNZI_TABLE_UI',
+    NET_CLIENT_REL: 'GUNZI_NET_CLIENT',
+}
 NODE = r'C:\Users\icymoon\.workbuddy\binaries\node\versions\22.22.2-3\node.exe'
 NODE_PATH = r'C:\Users\icymoon\.workbuddy\binaries\node\workspace\node_modules'
 TEST = REPO / 'tools/ui_smoke_test.js'
@@ -167,12 +174,129 @@ MUTATIONS = [
         "        this.addPanelText(overlay, `闲家已捡分牌 · 共 ${info.score} 分`, 0, y, 22, gold, true); // MUT",
         ['顶部报「本局明细」'],
     ),
+    (
+        'M24', '得分面板遮罩退回写死 1280（长条屏两侧留一条不变暗的缝）',
+        # 锚点必须带上 alpha=120 那一行：只写 `        g.fillRect(...)`（8 空格）会**先命中
+        # 断线遮罩**——断线那行的 12 空格里就含这 8 空格，且它在文件里更靠前。
+        '        g.fillColor = new Color(0, 0, 0, 120);\n'
+        '        g.fillRect(-this.vw / 2, -this.vh / 2, this.vw, this.vh);',
+        '        g.fillColor = new Color(0, 0, 0, 120);\n'
+        '        g.fillRect(-640, -360, 1280, 720); // MUT',
+        ['得分面板遮罩铺满可见宽度'],
+    ),
+    (
+        'M25', '断线遮罩退回写死 1280',
+        '            g.fillRect(-this.vw / 2, -this.vh / 2, this.vw, this.vh);',
+        '            g.fillRect(-640, -360, 1280, 720); // MUT',
+        ['断线遮罩铺满可见宽度'],
+    ),
+    (
+        'M26', '侧翼槽位写死 ±430（平板 4:3 上铭牌外缘 515 越过半宽 480 被裁）',
+        '        return Math.min(430, Math.max(180, this.vw / 2 - halfPlate - margin));',
+        '        return 430; // MUT',
+        ['平板 4:3（可见宽 960）侧翼槽位必须内收'],
+    ),
+    (
+        'M27', '手牌下行退回 -70（底边 -350，被 iPhone 横屏 Home 指示条压住）',
+        '        const rowY: number[] = rows === 2 ? [6, -62] : [0];',
+        '        const rowY: number[] = rows === 2 ? [6, -70] : [0]; // MUT',
+        ['手牌最低边离屏幕底 ≥ 15 单位'],
+    ),
+    (
+        'M28', '只改视觉不改命中区：fillRect 用 vw 但 UITransform 仍写死 1280（两侧点不动）',
+        '        overlay.addComponent(UITransform).setContentSize(this.vw, this.vh);',
+        '        overlay.addComponent(UITransform).setContentSize(1280, 720); // MUT',
+        ['得分面板的命中区（UITransform）同样是可见宽度'],
+    ),
+    # ---- 以下五条针对"连接失败必须看得见"（2026-09-20 真机事故）----
+    # 事故症状：顶栏永远停在"连接中…"，牌桌空着，连"连的是哪台机器"都看不到。
+    # 根因是小游戏平台连不上时可能**只回调 onerror**、不回调 onopen/onclose，
+    # 而当时 onerror 是空实现、又没有与平台无关的兜底 → stateHandler 永不触发 →
+    # renderTop 永不执行 → UI 全程静默。这几条变异就是把修复逐项退回旧行为，
+    # 确认新增的断言真的能抓住"退回静默"。
+    (
+        'M29', 'onerror 退回空实现（平台只报 onerror 时全程静默，顶栏停在「连接中…」）',
+        "            const msg = (ev as { message?: string } | undefined)?.message;\n"
+        "            this.failConnect(msg ? `连接出错：${msg}` : '连接出错（平台未给出原因）');",
+        "            /* MUT：退回空实现，平台只报 onerror 时静默 */",
+        ['平台只回调 onerror 时立即上报'],
+        NET_CLIENT_REL,
+    ),
+    (
+        'M30', '去掉建连超时自检（平台既不 onopen 也不 onclose 时永远干等）',
+        "            this.failConnect(`连接超时：${NetClient.CONNECT_TIMEOUT_MS / 1000} 秒内未建立`\n"
+        "                + `（readyState=${ws.readyState}）`);",
+        "            /* MUT：吞掉建连超时 */;",
+        ['自检超时必须判定离线并上报 UI'],
+        NET_CLIENT_REL,
+    ),
+    (
+        'M31', 'onopen 后不发 join（连上了但没入座 → 服务端不会推快照，牌桌永远空着）',
+        "            this.rawSend({\n"
+        "                op: 'join', roomId: this.roomId, playerId: this.playerId, seat: this.seat!,\n"
+        "            });",
+        "            /* MUT：连上但不入座 */",
+        ['onopen 时立刻发出 join'],
+        NET_CLIENT_REL,
+    ),
+    (
+        'M32', '消息体退回 String(data)（小游戏给 ArrayBuffer 时解析失败、静默丢快照）',
+        '            this.handleMessage(decodeMessageData(ev.data));',
+        '            this.handleMessage(String(ev.data)); // MUT',
+        ['消息体为 ArrayBuffer 时也能解析出快照'],
+        NET_CLIENT_REL,
+    ),
+    (
+        'M33', '顶栏不显示已重试次数（真机看不出在反复重连）',
+        "            const tries = this.net && this.net.attempts > 1 ? `（已重试 ${this.net.attempts} 次）` : '';",
+        "            const tries = ''; // MUT：不显示重试次数",
+        ['显示已重试次数'],
+    ),
+    # ---- 以下五条针对"坐庄（收贡人）必须能自己还贡"（2026-09-20 真机 bug）----
+    (
+        'M34', '把还贡按钮挂回服务端**不存在**的 RETURN_TRIBUTE 阶段（真机 bug 第一层原样复现）',
+        "                    const owed = this.pendingReturnOf(s);\n"
+        "                    if (owed) {",
+        "                    const owed = this.pendingReturnOf(s);\n"
+        "                    if (owed && s.phase === 'RETURN_TRIBUTE') { // MUT",
+        ['坐庄收到进贡'],
+    ),
+    (
+        'M35', 'pendingReturnOf 不判断"已还"→ 还完贡按钮还赖在桌上，点了必被服务端拒',
+        'if (t.receiver === this.mySeat && !done) {',
+        'if (t.receiver === this.mySeat) {',
+        ['已还过贡 → 不再出现「还贡」按钮'],
+    ),
+    (
+        'M36', '还贡的 payee 传成自己（收件人该是进贡人；传错会被服务端拒或给错人）',
+        "this.net?.sendCmd('RETURN_TRIBUTE', { cards: this.selectedCodes(), payee: still.payer });",
+        "this.net?.sendCmd('RETURN_TRIBUTE', { cards: this.selectedCodes(), payee: this.mySeat }); // MUT",
+        ['RETURN_TRIBUTE 的 payee 必须是进贡人本人'],
+    ),
+    (
+        'M37', '还贡不进按钮签名 → 还完贡按钮不消失 / 第二笔血切不过去',
+        "                    const owed = this.pendingReturnOf(s);\n"
+        "                    p.push(owed ? `ret:${owed.payer}:${owed.count}` : '-');",
+        "                    p.push('-'); // MUT：还贡不进签名",
+        ['签名把「还贡对象'],
+    ),
+    (
+        'M38', '去掉还贡张数的本地校验（选 1 张也发出去，让服务端拒绝 + 弹红字）',
+        "                            if (this.selected.length !== still.count) {\n"
+        "                                this.showToast(`要还 ${still.count} 张（已选 ${this.selected.length} 张）`, true);\n"
+        "                                return;\n"
+        "                            }",
+        "                            if (this.selected.length !== still.count) {\n"
+        "                                this.showToast(`要还 ${still.count} 张（已选 ${this.selected.length} 张）`, true);\n"
+        "                            }",
+        ['张数不足点「还贡」→ 本地拦下并说明要还几张'],
+    ),
 ]
 
 
-def run_test(src_path):
+def run_test(src_path, env_key='GUNZI_TABLE_UI'):
     env = dict(**__import__('os').environ)
-    env['GUNZI_TABLE_UI'] = str(src_path)
+    env[env_key] = str(src_path)
     env['NODE_PATH'] = NODE_PATH
     p = subprocess.run([NODE, str(TEST)], capture_output=True, text=True,
                        encoding='utf-8', errors='replace', env=env, cwd=str(REPO))
@@ -184,22 +308,50 @@ def main():
     # 与 _mut_check_server.py 保持一致 —— 改完一条断言想快速复验时，别等全部 13 条。
     only = {a.strip().upper() for a in sys.argv[1:]} if len(sys.argv) > 1 else None
     MUT_DIR.mkdir(parents=True, exist_ok=True)
-    original = SRC.read_text(encoding='utf-8')
     bad = 0
     broken = 0
-    for mid, desc, old, new, expects in MUTATIONS:
+    ambig = 0
+    src_cache = {}          # 按文件缓存源码：TableUI 与 NetClient 各读一次
+    for entry in MUTATIONS:
+        # 前 5 项固定；第 6 项可选，用来指定目标源文件（默认 TableUI.ts）。
+        # 需要多文件是因为"连接失败必须可见"这类逻辑在 net/NetClient.ts 里，
+        # 而它恰恰是本次真机问题的核心 —— 只在 TableUI 上做变异覆盖不到。
+        mid, desc, old, new, expects = entry[:5]
+        rel = entry[5] if len(entry) > 5 else TABLE_UI_REL
+        env_key = ENV_KEY_BY_FILE.get(rel)
+        if env_key is None:
+            # 新加文件却忘了在这儿登记 → 直接报错，否则会被当成 TableUI 的去跑，
+            # 结果是"锚点找不到"的 SKIP，看起来像源码改了、其实只是漏配。
+            print(f'  [SKIP] {mid} 源文件 {rel} 未登记对应的环境变量（见 ENV_KEY_BY_FILE）')
+            bad += 1
+            continue
         if only and mid not in only:
             continue
+        if rel not in src_cache:
+            src_cache[rel] = (REPO / rel).read_text(encoding='utf-8')
+        original = src_cache[rel]
         if old not in original:
-            print(f'  [SKIP] {mid} 原文没找到，可能实现已变：{old[:50]}')
+            print(f'  [SKIP] {mid} 原文没找到，可能实现已变（{rel}）：{old[:50]}')
             bad += 1
+            continue
+        n_site = original.count(old)
+        if n_site > 1:
+            # 锚点撞了多处：`replace(old, new, 1)` 只改第一处，而"第一处"未必是想改的那处 ——
+            # 缩进不同的两行，**短的那串会作为子串先命中长的那行**。症状极隐蔽：变异确实
+            # 让测试变红了，但红的是**另一条**断言，而目标断言永远绿（2026-09-18 实测：
+            # M24 想改「得分面板遮罩」，8 空格锚点先命中了缩进 12 空格的「断线遮罩」）。
+            # 所以当错误报出来，逼着把锚点加长到唯一。
+            print(f'  [AMBIG] {mid} 锚点在源码里出现 {n_site} 次，改哪一处不确定：{old[:56]!r}')
+            print('          把锚点加长（带上相邻唯一的一行，如 fillColor 的 alpha）再试')
+            bad += 1
+            ambig += 1
             continue
         # **固定同一个临时文件名**（每次覆盖写），不要每条变异建一个再删一个：
         # 2026-09-18 实测踩过 —— 一轮全表 20+ 次 unlink 会撞上环境的"批量删除需确认"阈值，
         # 脚本在第 3 条变异上就被打断（exit=1，日志停在 M2），而看起来像"测试有问题"。
         target = MUT_DIR / '_mutant.ts'
         target.write_text(original.replace(old, new, 1), encoding='utf-8')
-        out = run_test(target)
+        out = run_test(target, env_key)
         reds = [line.strip() for line in out.splitlines() if '[FAIL]' in line]
         ran = any('[OK]' in line for line in out.splitlines())
         if not reds and not ran:
@@ -226,8 +378,10 @@ def main():
     print('=' * 49)
     if broken:
         print(f'{broken} 个变异体没编译过（BROKEN），结果不可信，请先修 old/new 串')
-    if bad:
-        print(f'{bad} 个变异没被发现（测试有漏洞）')
+    if ambig:
+        print(f'{ambig} 个变异锚点不唯一（AMBIG），可能改错了地方，必须先加长锚点')
+    if bad - ambig:
+        print(f'{bad - ambig} 个变异没被发现（测试有漏洞）')
     if not bad and not broken:
         print('全部变异都成功变红')
     return 1 if (bad or broken) else 0

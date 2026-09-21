@@ -46,8 +46,13 @@ export class TableUI extends Component {
     // 兜底地址：只在拿不到 location 的环境生效（微信小游戏、Cocos 编辑器预览）。
     // Web 端运行时会自动探测——页面从哪台机器加载，就连哪台机器的后端，换 WiFi 无需改这里
     // （见 net/ServerUrl.ts）。构建小游戏时 build-wechatgame.ps1 会把本机 IP 注入进来。
-    // 临时指向别的后端：页面 URL 后加 ?server=ws://10.192.1.110:8080/ws
-    @property serverUrl = 'ws://10.192.1.110:8080/ws';
+    // 临时指向别的后端：页面 URL 后加 ?server=ws://<host>:8080/ws
+    // （尖括号是刻意的：构建脚本会按 ws://<字母数字.- >:8080/ws 的模式批量替换本机 IP，
+    //   示例若写成真地址，注释也会被一起改掉、源码反复变脏。）
+    // 这里留 127.0.0.1 表示"本机默认值"：**真机地址一律由 build-wechatgame.ps1 注入**。
+    // 不要把某个开发者的局域网 IP 写死在这儿 —— 换 WiFi 就失效，
+    // 而且会让"注入没生效"看起来像生效了（构建脚本的产物自检会兜住这一点）。
+    @property serverUrl = 'ws://127.0.0.1:8080/ws';
     @property roomId = 1001;
     @property playerId = 1;
     /**
@@ -75,6 +80,7 @@ export class TableUI extends Component {
     // 重复牌（两张同点同花的 S5）天然支持：array 允许重复元素。
     private selected: string[] = [];
     private vw = 1280;                              // 本机实际可见宽度（FIXED_HEIGHT 下按屏幕比例算出来）
+    private vh = 720;                               // 可见高度：FIXED_HEIGHT 把它钉死在设计高度，恒为 720
     private tw = 1120;                              // 牌桌绒布宽度（随屏幕放宽，避免宽屏两侧露底色）
     private lastDiagKey = '';                       // 顶栏诊断日志去重（快照很频繁，避免刷屏）
     /** 最近一次服务端错误：顶栏常驻显示（toast 会消失，入座失败这种卡死状态必须一直看得见） */
@@ -275,6 +281,15 @@ export class TableUI extends Component {
     private offlineSince = 0;       // 掉线时刻（遮罩显示已等待秒数）
     private hintMyTurnOnSnapshot = false; // 重连成功后，快照到达时提示"轮到你"
 
+    /**
+     * 【阶段名只有一个真相来源：服务端 GamePhase】
+     * 服务端枚举是 WAITING / DEALING / BIDDING / **TRIBUTE** / BURYING / PLAYING / SETTLING / ROUND_OVER ——
+     * 进贡、还贡、抗贡**同属 TRIBUTE 一个阶段**，**不存在 RETURN_TRIBUTE 阶段**。
+     * 下面集合与 {@link PHASE_TEXT} 里的 `RETURN_TRIBUTE` 只是"名字→文案"的兼容映射
+     * （万一将来服务端真拆出这个阶段，文案已经在位），**不代表它今天会到来**：
+     * 任何 `switch (s.phase)` 都不要为它写分支 —— 那是永远进不去的死分支。
+     * 2026-09-20 真机 bug 就是栽在这里（详见 renderButtons 的 TRIBUTE 分支注释）。
+     */
     /** 只有这些阶段的 banker 才是"本局"庄家（结算切庄后 DEALING/BIDDING 里已是下一局的） */
     private static readonly IN_GAME_PHASES = new Set(['BURYING', 'TRIBUTE', 'RETURN_TRIBUTE', 'PLAYING', 'SETTLING']);
 
@@ -338,14 +353,33 @@ export class TableUI extends Component {
      * 放在右边，等于把罗盘摆了 180°（屏幕上北在下、南在上），玩家会看到上方标着
      * SOUTH、而自己（本该是 SOUTH）在下方 —— N/S 看着就是反的。
      */
+    /**
+     * 左右两家（西/东）槽位的横向偏移。
+     *
+     * <p>原先写死 ±430：在所有**手机**上都安全（可见半宽 ≥ 640），但在窄屏上会挨裁 ——
+     * 折叠屏展开 / 平板 4:3 的可见宽只有 960（半宽 480），而铭牌 150 宽、呼吸光环外缘
+     * 到 ±85，外缘落在 430+85 = 515 > 480，左右两家的铭牌会被屏幕切掉一截。
+     *
+     * <p>所以改成按可见宽度推导，并**保留 430 作为上限**：这样 16:9 及以上（半宽 ≥ 640）
+     * 的取值与过去逐字节一致（手机行为不变），只有更窄的屏幕才向内收。
+     */
+    private sideX(): number {
+        const halfPlate = 85;   // 呼吸光环外半宽（铭牌 75 + 光环外扩 10）
+        const margin = 12;      // 与屏幕边缘留一条缝
+        // 下限 180：再窄也不让左右两块铭牌穿过桌面中心叠在一起
+        return Math.min(430, Math.max(180, this.vw / 2 - halfPlate - margin));
+    }
+
     private plateLocal(seat: SeatName): Vec3 {
-        const slots = [new Vec3(0, -240, 0), new Vec3(-430, -20, 0), new Vec3(0, 125, 0), new Vec3(430, -20, 0)];
+        const x = this.sideX();
+        const slots = [new Vec3(0, -240, 0), new Vec3(-x, -20, 0), new Vec3(0, 125, 0), new Vec3(x, -20, 0)];
         return slots[this.relOf(seat)];
     }
 
-    /** 该座位墩牌行的局部坐标（牌行中心） */
+    /** 该座位墩牌行的局部坐标（牌行中心；横向与铭牌同源，见 {@link #sideX}） */
     private trickLocal(seat: SeatName): Vec3 {
-        const slots = [new Vec3(0, -195, 0), new Vec3(-430, 25, 0), new Vec3(0, 80, 0), new Vec3(430, 25, 0)];
+        const x = this.sideX();
+        const slots = [new Vec3(0, -195, 0), new Vec3(-x, 25, 0), new Vec3(0, 80, 0), new Vec3(x, 25, 0)];
         return slots[this.relOf(seat)];
     }
 
@@ -384,6 +418,12 @@ export class TableUI extends Component {
         view.setDesignResolutionSize(1280, 720, ResolutionPolicy.FIXED_HEIGHT);
         const fs = view.getFrameSize();
         this.vw = fs.height > 0 ? 720 * fs.width / fs.height : 1280;
+        // FIXED_HEIGHT 的语义就是"可见高度恒等于设计高度"，所以 vh 恒为 720，
+        // 而 vw 随屏幕比例变化（16:9→1280、20:9→1600、21:9→1680）。
+        // 【规矩】凡是"铺满屏幕"的遮罩/底色，都必须用这两个值算，不许写死 1280：
+        // 长条屏上写死会在两侧留下一条既不变暗、**也点不动**的缝（得分面板就是如此，
+        // 因为"点任意处收起"的命中判定看的是节点尺寸）。
+        this.vh = 720;
         this.tw = Math.min(1500, this.vw - 80);
         // 座位覆盖要在 buildLayout 之前生效：铭牌的"我"标记与槽位摆位都读 mySeat
         this.mySeat = resolveSeatOverride(this.mySeat);
@@ -490,10 +530,11 @@ export class TableUI extends Component {
             // 全屏半透明遮罩（添加顺序最后 = 最顶层，盖住牌桌但透出牌局轮廓）
             const mask = new Node('reconnect-mask');
             mask.layer = 1 << 25;
-            mask.addComponent(UITransform).setContentSize(1280, 720);
+            // 铺满**可见**区域：写死 1280 会在 20:9 / 21:9 屏的两侧留下一条不透光的缝
+            mask.addComponent(UITransform).setContentSize(this.vw, this.vh);
             const g = mask.addComponent(Graphics);
             g.fillColor = new Color(0, 0, 0, 165);
-            g.fillRect(-640, -360, 1280, 720);
+            g.fillRect(-this.vw / 2, -this.vh / 2, this.vw, this.vh);
             const title = this.makeLabelNode('', 34, new Color(255, 210, 120, 255));
             title.setPosition(0, 30, 0);
             mask.addChild(title);
@@ -1235,17 +1276,19 @@ export class TableUI extends Component {
             // 为什么连不上、该找谁——真人真机排查时只能干看着（"什么也做不了"）。
             // 现在把地址与可能原因直接打在顶栏，并配合"重试/新局"常驻按钮。
             const url = this.serverUrl ? describeServerUrl(this.serverUrl) : '(未配置 serverUrl)';
-            // 入座失败（座位被占等）不会有任何快照，界面会永远停在"等待服务器数据"——
-            // 这种状态必须给出下一步动作，否则玩家只能干等着不知道能做什么。
+            // 已重试次数也一起显示：真机上"连不上"最常见的原因就是地址不对
+            // （小游戏没有 location，只能用构建时注入的地址）。次数在涨 = 一直没连上；
+            // 次数归零后又出现 = 连上过再断。两种情况的处理方式完全不同。
+            const tries = this.net && this.net.attempts > 1 ? `（已重试 ${this.net.attempts} 次）` : '';
             if (this.lastNetError) {
                 this.setTopText(this.lastNetError.includes('座位已被占用')
                     ? `⚠ 入座失败：${this.lastNetError} · 本端 seat=${this.mySeat}，`
                         + `请让两端座位名一致（服务端启动参数 / 页面 ?seat=）`
-                    : `⚠ ${this.lastNetError}`);
+                    : `⚠ ${this.lastNetError} · ${url}${tries}`);
             } else {
                 this.setTopText(this.net?.online
                     ? `已连接 ${url} · 等待服务器数据…`
-                    : `连接不上 ${url}（手机需与电脑同一 WiFi；校园网可能禁止设备互访）`);
+                    : `连接不上 ${url}（手机需与电脑同一 WiFi；校园网可能禁止设备互访）${tries}`);
             }
             this.setTopTrumpBadge(null);
             this.renderScoreBar(null);
@@ -1537,6 +1580,28 @@ export class TableUI extends Component {
     }
 
     /**
+     * 本局「我作为收贡人还欠谁一次还贡」——收贡人视角的待办。
+     *
+     * <p>数据源必须是 {@link tributesOf}（**已收贡流水**），**不能用 `pendingTributes`**：
+     * 进贡一交上去，`GameRoom.recordTribute` 立刻把这条义务从 `pendingTributes` 摘掉，
+     * 所以"谁贡给了我"在 `pendingTributes` 里根本查不到。
+     * 2026-09-20 那个真机 bug 有**两层**，这是第二层；第一层是把按钮挂在了服务端
+     * 从不发送的 `RETURN_TRIBUTE` 阶段上（见 renderButtons 的 TRIBUTE 分支注释）。
+     * 两层缺一不可 —— 只修阶段名而不换数据源，按钮照样出不来。
+     *
+     * @return 第一位"收了但没还"的进贡人 + 应还张数；不欠则 null
+     */
+    private pendingReturnOf(s: SnapshotMsgDown | null): { payer: SeatName; count: number } | null {
+        for (const t of this.tributesOf(s)) {
+            const done = !!t.returned && t.returned.length > 0;
+            if (t.receiver === this.mySeat && !done) {
+                return { payer: t.payer, count: t.cards.length };
+            }
+        }
+        return null;
+    }
+
+    /**
      * 进贡 / 还贡明细行：左边一句话、右边一串牌面。
      *
      * <p>三种行：`X 进贡 → Y` + 贡牌（已交）、`Y 还贡 → X` + 还牌（没还则整行不出现）、
@@ -1621,10 +1686,14 @@ export class TableUI extends Component {
 
         const overlay = new Node('scorepanel');
         overlay.layer = 1 << 25;
-        overlay.addComponent(UITransform).setContentSize(1280, 720);
+        // 【必须用可见尺寸，不能写死 1280】这块遮罩同时就是"点任意处收起面板"的命中区
+        // （TOUCH_START 注册在 overlay 身上），而 Cocos 的命中判定看的是节点的 UITransform
+        // 尺寸。写死 1280 的后果：长条屏两侧各 160~200 设计单位既不变暗、**也点不动**，
+        // 玩家会以为面板卡死了。可见宽 vw 在 16:9 上正好是 1280，行为不变。
+        overlay.addComponent(UITransform).setContentSize(this.vw, this.vh);
         const g = overlay.addComponent(Graphics);
         g.fillColor = new Color(0, 0, 0, 120);
-        g.fillRect(-640, -360, 1280, 720);
+        g.fillRect(-this.vw / 2, -this.vh / 2, this.vw, this.vh);
         g.fillColor = new Color(26, 40, 62, 252);
         g.roundRect(-PW / 2, -PH / 2 - 10, PW, PH, 16);
         g.fill();
@@ -2235,10 +2304,19 @@ export class TableUI extends Component {
             split = best;
         }
 
-        // 两行：前半（主牌堆在前）在上行 +6，后半在下行 -70。行距 76 < 牌高 80，
-        // 重叠 4 单位让两行像紧贴的一摞；FIXED_HEIGHT 下可见 y∈±360，上下都不越界。
+        // 两行：前半（主牌堆在前）在上行 +6，后半在下行 -62。行距 68 < 牌高 80，
+        // 重叠 12 单位让两行像紧贴的一摞；FIXED_HEIGHT 下可见 y∈±360，上下都不越界。
+        //
+        // 【下行为什么从 -70 抬到 -62】手牌挂在 y=-240 的 handNode 上，下行底边原本落在
+        // 全局 -350，距屏幕底只剩 10 单位 —— iPhone 横屏的 Home 指示条正好压在最下沿。
+        // 想"整体上移"其实**没有空间**：上行顶边 -194，再往上 9 单位就碰到自己铭牌的
+        // 呼吸光环（中心 -160、含光环半高 25 → 底边 -185）。所以只能压行距：**只把下行
+        // 抬 8 单位**，底边回到 -342（余量 18 单位），上行一步不动，不引入任何新碰撞。
+        // 代价：两行重叠由 4 → 12 单位（单张牌高 80，遮挡 15%；牌面信息在顶部，可接受）。
+        // 注：想彻底避开 iOS 安全区（横屏底部约 21pt ≈ 38 设计单位）必须改版式
+        //（缩牌或挪铭牌），不在本次范围 —— 真机上先看这 8 单位够不够。
         const rowDefs: number[][] = rows === 2 ? [order.slice(0, split), order.slice(split)] : [order];
-        const rowY: number[] = rows === 2 ? [6, -70] : [0];
+        const rowY: number[] = rows === 2 ? [6, -62] : [0];
         for (let r = 0; r < rowDefs.length; r++) {
             this.layoutHandRow(rowDefs[r], rowY[r], hand, cardW, NICE, gap, maxSpread);
         }
@@ -2565,9 +2643,20 @@ export class TableUI extends Component {
                 break;
             }
             case 'TRIBUTE': {
+                // 【阶段真相】服务端 GamePhase 只有 TRIBUTE —— 进贡、还贡、抗贡同属这一个阶段，
+                // 快照里的 phase **永远**是 'TRIBUTE'，没有 'RETURN_TRIBUTE'。
+                //
+                // 2026-09-20 真机 bug（Tracy：坐庄喝血那局"没让我还贡、直接就开始了，
+                // 可明细里已经有还贡的牌"）：这里原先只有"我是进贡人才给按钮"这一条，
+                // 而"还贡"被写在了一个 `case 'RETURN_TRIBUTE'` 里 —— 那个阶段服务端从不发送，
+                // 是**永远进不去的死分支**。于是收贡人（庄家）整局都没有还贡入口：
+                // 服务端 humanWaiter() 明明返回了他、在等他，32 秒后超时托管代还 → 直接进扣底。
+                // 玩家视角就是"我没有操作，牌却自己贡了、还了"。别再按阶段名分开写。
                 const mine = s.pendingTributes?.[this.mySeat];
                 if (mine) {
-                    this.makeButton('进贡', 0, () => {
+                    // 我是进贡人（收贡人的上家）：交足血数的牌。文案带张数，省得玩家猜要选几张。
+                    const need = mine.blood;
+                    this.makeButton(`进贡(${need}张)`, 0, () => {
                         const stillMine = this.snap?.pendingTributes?.[this.mySeat];
                         if (this.snap?.phase !== 'TRIBUTE' || !stillMine) {
                             this.showToast('进贡阶段已经结束', true);
@@ -2575,28 +2664,33 @@ export class TableUI extends Component {
                             return;
                         }
                         if (this.selected.length === 0) { this.showToast('先选要贡的牌', true); return; }
+                        if (this.selected.length !== stillMine.blood) {
+                            this.showToast(`要贡 ${stillMine.blood} 张（已选 ${this.selected.length} 张）`, true);
+                            return;
+                        }
                         this.net?.sendCmd('TRIBUTE', { cards: this.selectedCodes(), payee: stillMine.receiver });
                         this.resetSelection();
                     });
-                }
-                break;
-            }
-            case 'RETURN_TRIBUTE': {
-                const payer = Object.entries(s.pendingTributes ?? {})
-                    .find(([, v]) => v.receiver === this.mySeat)?.[0];
-                if (payer) {
-                    this.makeButton('还贡', 0, () => {
-                        const stillPayer = Object.entries(this.snap?.pendingTributes ?? {})
-                            .find(([, v]) => v.receiver === this.mySeat)?.[0];
-                        if (this.snap?.phase !== 'RETURN_TRIBUTE' || stillPayer !== payer) {
-                            this.showToast('还贡阶段已经结束', true);
+                } else {
+                    // 我是收贡人：把收到的血还回去（还贡张数必须等于收到的张数）
+                    const owed = this.pendingReturnOf(s);
+                    if (owed) {
+                        this.makeButton(`还贡(${owed.count}张)`, 0, () => {
+                            const still = this.pendingReturnOf(this.snap);
+                            if (this.snap?.phase !== 'TRIBUTE' || !still || still.payer !== owed.payer) {
+                                this.showToast('还贡阶段已经结束', true);
+                                this.resetSelection();
+                                return;
+                            }
+                            if (this.selected.length === 0) { this.showToast('先选要还的牌', true); return; }
+                            if (this.selected.length !== still.count) {
+                                this.showToast(`要还 ${still.count} 张（已选 ${this.selected.length} 张）`, true);
+                                return;
+                            }
+                            this.net?.sendCmd('RETURN_TRIBUTE', { cards: this.selectedCodes(), payee: still.payer });
                             this.resetSelection();
-                            return;
-                        }
-                        if (this.selected.length === 0) { this.showToast('先选要还的牌', true); return; }
-                        this.net?.sendCmd('RETURN_TRIBUTE', { cards: this.selectedCodes(), payee: payer });
-                        this.resetSelection();
-                    });
+                        });
+                    }
                 }
                 break;
             }
@@ -3051,13 +3145,17 @@ export class TableUI extends Component {
             case 'PLAYING':
                 p.push(s.turn === this.mySeat ? 'mine' : '-');
                 break;
-            case 'TRIBUTE':
-                p.push(s.pendingTributes?.[this.mySeat]?.receiver ?? '-');
-                break;
-            case 'RETURN_TRIBUTE': {
-                const payer = Object.entries(s.pendingTributes ?? {})
-                    .find(([, v]) => v.receiver === this.mySeat)?.[0];
-                p.push(payer ?? '-');                       // 还贡的收件人写进回调参数
+            case 'TRIBUTE': {
+                // 进贡与还贡同属 TRIBUTE（服务端没有 RETURN_TRIBUTE 阶段，见 renderButtons）。
+                // **张数与对象都必须进签名**：一局可能有两笔血（分差血 + 扣王血）且收贡人不同，
+                // 第一笔还完按钮要立刻变成第二笔；签名不带这些就会出现"该变的没变"的死按钮。
+                const mine = s.pendingTributes?.[this.mySeat];
+                if (mine) {
+                    p.push(`pay:${mine.blood}:${mine.receiver}`);
+                } else {
+                    const owed = this.pendingReturnOf(s);
+                    p.push(owed ? `ret:${owed.payer}:${owed.count}` : '-');
+                }
                 break;
             }
             default:

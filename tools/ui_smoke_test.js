@@ -36,6 +36,14 @@ const REPO = path.resolve(__dirname, '..');
 const TABLE_UI = process.env.GUNZI_TABLE_UI
     || path.join(REPO, 'client', 'assets', 'scripts', 'ui', 'TableUI.ts');
 
+// 客户端源码根目录。**兄弟模块一律从这里解析**，绝不能从被测文件的位置推导：
+// 变异验证会把副本丢到 client/temp/mut/ 下，从那里推导会指向不存在的目录，
+// 结果不是"断言变红"而是整个测试崩掉（看起来像脚本坏了）。
+const SCRIPTS = path.join(REPO, 'client', 'assets', 'scripts');
+// 允许用 GUNZI_NET_CLIENT 指向一份候选的网络层副本（同样用于变异验证）
+const NET_CLIENT = process.env.GUNZI_NET_CLIENT
+    || path.join(SCRIPTS, 'net', 'NetClient.ts');
+
 // ---------- 1. 找到 typescript ----------
 function resolveTypescript() {
     const cands = [
@@ -89,6 +97,8 @@ function makeStub(label) {
 let createdTiles = [];
 // addSuitIcon 的调用留痕：用来断言"面板算对了提亮配色，也真的把提亮配色交了出去"
 let suitIconCalls = [];
+// createCardNode 的调用留痕：用来量手牌的几何（每行 baseY → 最低边离屏幕底多远）
+let createdCards = [];
 const fakeTile = () => ({
     children: [],
     handlers: {},
@@ -110,7 +120,7 @@ const cardUiStub = {
     addSuitIcon: (parent, suit, x, y, size, color) => { suitIconCalls.push({ suit, color }); },
     suitColor: () => '#000000',
     cardFace: (c) => ({ text: String(c) }),
-    createCardNode: () => fakeTile(),
+    createCardNode: () => { const t = fakeTile(); createdCards.push(t); return t; },
     createMiniCardNode: () => fakeTile(),
     drawCardBg: () => { /* noop */ },
 };
@@ -224,6 +234,12 @@ function loadTableUI(ccImpl) {
     const requireShim = (spec) => {
         if (spec === 'cc') return ccImpl;
         if (spec === './CardUI') return cardUiStub;
+        // 真实加载地址解析模块：顶栏"连不上/连的哪台机器"的文案依赖它，
+        // 用 Proxy stub 会让断言看到 undefined，测不出真问题。
+        // （注意 TableUI 在 ui/ 下，import 的是 '../net/ServerUrl'，别只匹配 './net/...'）
+        if (/\/ServerUrl$/.test(spec)) {
+            return loadTsModule(path.join(SCRIPTS, 'net', 'ServerUrl.ts'));
+        }
         if (spec.startsWith('.')) return makeStub(spec);   // 其他兄弟模块：被测逻辑用不到
         return Module.createRequire(TABLE_UI)(spec);
     };
@@ -1232,6 +1248,494 @@ function collectLabels(root) {
     check('面板把亮红配色真正交给了 ♥ 图标',
         !!heartCall && !!heartCall.color && heartCall.color.r > 180 && heartCall.color.g < 120,
         JSON.stringify(heartCall));
+}
+
+// --- 28. 【真机适配】铺满屏幕的东西必须随可见宽度走（写死 1280 只对 16:9 成立） ---
+// 背景：1280×720 是 16:9，而手机横屏普遍 19.5:9~21:9（可见宽 1561~1680）；
+// 反过来平板 / 折叠屏展开是 4:3，可见宽只有 960（半宽 480）。FIXED_HEIGHT 让 vw
+// 随屏幕变，所以"铺满屏幕"的遮罩和"贴边"的铭牌都不能写死 —— 两个方向都钉住。
+{
+    /** 在节点树里按名字找节点（面板/遮罩都挂在 ui.node 上） */
+    function findNode(root, name) {
+        if (!root) return null;
+        if (root.name === name) return root;
+        for (const c of root.children || []) {
+            const hit = findNode(c, name);
+            if (hit) return hit;
+        }
+        return null;
+    }
+    /** 造一个"已设好可见宽度"的最小实例 */
+    function layoutUi(vw) {
+        const ui = newUi();
+        ui.node = new FAKE_CC.Node('root');
+        ui.mySeat = 'SOUTH';
+        ui.vw = vw;
+        return ui;
+    }
+    /** 节点上第一条 fillRect 的宽度 —— 遮罩尺寸就画在这条指令上 */
+    function maskWidth(node) {
+        const g = node && node.getComponent(FAKE_CC.Graphics);
+        const op = g && g.ops.find(o => o.op === 'fillRect');
+        return op ? op.w : NaN;
+    }
+
+    // (a) 侧翼槽位 sideX：手机端必须与老的 ±430 逐字节一致（不能顺手改动手机观感）
+    const phone = layoutUi(1280);     // 16:9
+    const wide = layoutUi(1680);      // 21:9
+    const tablet = layoutUi(960);     // 平板 / 折叠屏展开 4:3
+    check('侧翼槽位在 16:9 上仍是 ±430（手机行为不变）',
+        phone.sideX() === 430, String(phone.sideX()));
+    check('侧翼槽位在 21:9 上仍是 ±430（更宽也不把铭牌甩到屏幕边上）',
+        wide.sideX() === 430, String(wide.sideX()));
+    check('平板 4:3（可见宽 960）侧翼槽位必须内收：430+85=515 已越过半宽 480',
+        tablet.sideX() <= 480 - 85, String(tablet.sideX()));
+
+    // (b) 端到端：铭牌与墩牌行**真的**用了它 —— 连同呼吸光环不得越出屏幕
+    for (const [label, ui] of [['手机 16:9', phone], ['平板 4:3', tablet]]) {
+        const left = ui.plateLocal('WEST').x;
+        const trickLeft = ui.trickLocal('WEST').x;
+        check(`${label}：左家铭牌含光环不越出屏幕左缘`,
+            left + 85 <= ui.vw / 2 + 0.001, `x=${left}, 半宽=${ui.vw / 2}`);
+        check(`${label}：墩牌行与铭牌同源取值（不会一个内收、一个没动）`,
+            trickLeft === left, `trick=${trickLeft}, plate=${left}`);
+    }
+
+    // (c) 得分面板遮罩：它既是视觉底色，**也是"点任意处收起"的命中区**
+    const panelUi = layoutUi(1680);
+    panelUi.scoreBarNode = new FAKE_CC.Node('scorebar');
+    panelUi.scoreCapsuleLabel = { string: '' };
+    panelUi.scoreExpanded = true;
+    panelUi.renderScoreBar({
+        gameNumber: 2, phase: 'PLAYING', banker: 'SOUTH',
+        trickPoints: { B: 5 }, takenPointCards: { B: ['D5'] },
+    });
+    const panel = findNode(panelUi.node, 'scorepanel');
+    check('得分面板遮罩铺满可见宽度（写死 1280 会在 21:9 两侧各留 200 单位不变的缝）',
+        maskWidth(panel) === 1680, String(maskWidth(panel)));
+    check('得分面板的命中区（UITransform）同样是可见宽度：否则两侧点下去没反应',
+        !!panel && panel.getComponent(FAKE_CC.UITransform).contentSize.width === 1680,
+        panel ? String(panel.getComponent(FAKE_CC.UITransform).contentSize.width) : 'panel 不存在');
+
+    // (d) 断线重连遮罩同理（纯视觉，但两侧透出牌桌很难看）
+    const reconnectUi = layoutUi(1680);
+    reconnectUi.offlineSince = Date.now();
+    reconnectUi.showReconnectOverlay();
+    const rc = findNode(reconnectUi.node, 'reconnect-mask');
+    check('断线遮罩铺满可见宽度',
+        maskWidth(rc) === 1680, String(maskWidth(rc)));
+
+    // (e) 手牌：两行的顶边与底边都要落在安全带里
+    //     底边 —— iPhone 横屏的 Home 指示条压在最下沿；
+    //     顶边 —— 再往上就是自己铭牌的呼吸光环（中心 -160、含光环半高 25 → 底边 -185）。
+    const handUi = layoutUi(1680);
+    handUi.handNode = new FAKE_CC.Node('hand');
+    handUi.handNode.setPosition(0, -240, 0);    // 与 buildLayout 里的 handNode 一致
+    const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K'];
+    const hand39 = [];
+    outer: for (const s of ['S', 'H', 'C']) {
+        for (const r of ranks) {
+            hand39.push(s + r);
+            if (hand39.length === 39) break outer;
+        }
+    }
+    handUi.snap = { phase: 'PLAYING', yourHand: hand39 };
+    createdCards = [];
+    handUi.renderHand();
+    const CARD_H = 80;
+    const handY = handUi.handNode.position.y;
+    const ys = createdCards.map(c => c.position.y);
+    check('39 张手牌确实分成了两行',
+        createdCards.length === 39 && new Set(ys).size === 2,
+        `张数=${createdCards.length}, 行数=${new Set(ys).size}`);
+    const lowest = Math.min(...ys) - CARD_H / 2 + handY;
+    const highest = Math.max(...ys) + CARD_H / 2 + handY;
+    check('手牌最低边离屏幕底 ≥ 15 单位（不给 Home 指示条压住）',
+        lowest >= -360 + 15, `最低边=${lowest}`);
+    check('手牌最高边不顶到我的铭牌光环（须 ≤ -189）',
+        highest <= -189, `最高边=${highest}`);
+}
+
+// ============================================================
+// 第 29 段：NetClient —— 连接失败必须"看得见"（2026-09-20 真机排查）
+// ------------------------------------------------------------
+// 真机症状：顶栏永远停在"连接中…"，连"连的是哪台机器"都看不到，牌桌空着。
+// 根因不是服务端（探针验证它正常推快照），而是**任何一条失败路径都没把消息交到 UI**：
+//   · 小游戏平台的 wx.connectSocket 连不上时可能只回调 onError，
+//     既不回调 onOpen 也不回调 onClose —— 而当时 onerror 是空实现；
+//   · 又没有与平台无关的兜底，于是 stateHandler 永不触发 →
+//     renderTop 永不执行 → 顶栏保持构造时的初始文案，静默干等。
+// 这组断言锁的是"失败必须可见，且绝不能把正常连接误判成失败"。
+// ============================================================
+
+/** 造一个可控的 WebSocket + 定时器环境（模拟小游戏平台"不回调"的行为） */
+function makeFakeNetEnv() {
+    const saved = {
+        WebSocket: globalThis.WebSocket,
+        setTimeout: globalThis.setTimeout,
+        clearTimeout: globalThis.clearTimeout,
+        setInterval: globalThis.setInterval,
+        clearInterval: globalThis.clearInterval,
+    };
+    const state = { sockets: [], timers: [], nextId: 1 };
+    class FakeWebSocket {
+        constructor(url) {
+            this.url = url;
+            this.readyState = FakeWebSocket.CONNECTING;
+            this.sent = [];
+            this.onopen = null; this.onmessage = null; this.onclose = null; this.onerror = null;
+            state.sockets.push(this);
+        }
+        send(d) { this.sent.push(d); }
+        close() { this.readyState = FakeWebSocket.CLOSED; }
+    }
+    FakeWebSocket.CONNECTING = 0;
+    FakeWebSocket.OPEN = 1;
+    FakeWebSocket.CLOSING = 2;
+    FakeWebSocket.CLOSED = 3;
+    globalThis.WebSocket = FakeWebSocket;
+    globalThis.setTimeout = (fn, ms) => {
+        const id = state.nextId++;
+        state.timers.push({ id, fn, ms, cancelled: false });
+        return id;
+    };
+    globalThis.clearTimeout = (id) => {
+        const t = state.timers.find(x => x.id === id);
+        if (t) t.cancelled = true;
+    };
+    globalThis.setInterval = () => state.nextId++;
+    globalThis.clearInterval = () => { /* noop */ };
+    return {
+        FakeWebSocket,
+        state,
+        restore() { Object.assign(globalThis, saved); },
+        /** 触发所有未取消的定时器（模拟"时间到了"），返回触发个数 */
+        fireTimers() {
+            const list = state.timers.filter(t => !t.cancelled);
+            state.timers = state.timers.filter(t => t.cancelled);
+            for (const t of list) t.fn();
+            return list.length;
+        },
+    };
+}
+
+/** 转译并加载任意客户端 TS 模块（只 stub 相对依赖，被测逻辑不碰 cc） */
+function loadTsModule(file) {
+    const src = fs.readFileSync(file, 'utf8');
+    const out = ts.transpileModule(src, {
+        compilerOptions: {
+            module: ts.ModuleKind.CommonJS,
+            target: ts.ScriptTarget.ES2019,
+            experimentalDecorators: true,
+            esModuleInterop: true,
+            removeComments: false,
+        },
+        fileName: file,
+    });
+    const mod = { exports: {} };
+    const requireShim = (spec) => {
+        if (spec.startsWith('.')) return makeStub(spec);   // 兄弟模块：被测逻辑用不到
+        return Module.createRequire(file)(spec);
+    };
+    const fn = new Function('require', 'module', 'exports', '__filename', '__dirname', out.outputText);
+    fn(requireShim, mod, mod.exports, file, path.dirname(file));
+    return mod.exports;
+}
+
+{
+    // ---- 29.1 平台不回调任何事件（挂起）→ 建连自检必须把失败交给 UI ----
+    {
+        const env = makeFakeNetEnv();
+        const { NetClient } = loadTsModule(NET_CLIENT);
+        const states = [];
+        const errors = [];
+        const net = new NetClient('ws://127.0.0.1:8080/ws');
+        net.onStateChange(ok => states.push(ok));
+        net.onError(r => errors.push(r));
+        net.join(1001, 1, 'SOUTH');
+        check('NetClient: join 会立即建立 socket', env.state.sockets.length === 1);
+        check('NetClient: 连接挂起的瞬间不误报失败', states.length === 0, JSON.stringify(states));
+        env.fireTimers();   // 自检到点
+        check('NetClient: 平台既不 onopen 也不 onclose 时，自检超时必须判定离线并上报 UI',
+            states.includes(false), JSON.stringify(states));
+        check('NetClient: 超时必须给出可读原因（含「超时」）而非静默',
+            errors.length > 0 && /超时/.test(errors[0]), JSON.stringify(errors));
+        check('NetClient: 失败原因可被顶栏读取（lastError 非空）', !!net.lastError);
+        check('NetClient: 失败后自动排重连（attempts 递增，顶栏可显示「已重试 N 次」）',
+            net.attempts >= 1, `attempts=${net.attempts}`);
+        env.restore();
+    }
+
+    // ---- 29.2 平台只给 onerror（微信的典型行为）→ 必须立刻上报 ----
+    {
+        const env = makeFakeNetEnv();
+        const { NetClient } = loadTsModule(NET_CLIENT);
+        const errors = [];
+        const states = [];
+        const net = new NetClient('ws://127.0.0.1:8080/ws');
+        net.onError(r => errors.push(r));
+        net.onStateChange(ok => states.push(ok));
+        net.join(1001, 1, 'SOUTH');
+        const ws = env.state.sockets[0];
+        ws.onerror({ message: 'url not in domain list' });   // 模拟微信域名校验失败
+        check('NetClient: 平台只回调 onerror 时立即上报（不必干等 8 秒）',
+            errors.length === 1 && /url not in domain list/.test(errors[0]), JSON.stringify(errors));
+        check('NetClient: onerror 上报同时通知 UI 离线', states.includes(false), JSON.stringify(states));
+        ws.onerror({ message: 'again' });
+        check('NetClient: 已判失败的连接再次报错不重复上报（避免重连风暴）',
+            errors.length === 1, JSON.stringify(errors));
+        env.restore();
+    }
+
+    // ---- 29.3 正常连上 → 自检必须作废，不能把好连接判成失败 ----
+    {
+        const env = makeFakeNetEnv();
+        const { NetClient } = loadTsModule(NET_CLIENT);
+        const states = [];
+        const net = new NetClient('ws://127.0.0.1:8080/ws');
+        net.onStateChange(ok => states.push(ok));
+        net.join(1001, 1, 'SOUTH');
+        const ws = env.state.sockets[0];
+        ws.readyState = env.FakeWebSocket.OPEN;
+        ws.onopen();
+        check('NetClient: onopen 后通知 UI 在线', states.includes(true), JSON.stringify(states));
+        check('NetClient: onopen 时立刻发出 join（服务端靠它才会推快照）',
+            ws.sent.some(s => s.includes('"op":"join"')), JSON.stringify(ws.sent));
+        check('NetClient: 连上后 attempts 归零（顶栏不再显示「已重试」）', net.attempts === 0);
+        env.fireTimers();
+        check('NetClient: 连上后建连自检必须作废（不能误判为超时）',
+            !states.includes(false), JSON.stringify(states));
+        env.restore();
+    }
+
+    // ---- 29.4 消息体不是字符串（小游戏适配层可能给 ArrayBuffer）→ 必须仍能解析 ----
+    {
+        const env = makeFakeNetEnv();
+        const { NetClient } = loadTsModule(NET_CLIENT);
+        const snaps = [];
+        const net = new NetClient('ws://127.0.0.1:8080/ws');
+        net.onSnapshot(s => snaps.push(s));
+        net.join(1001, 1, 'SOUTH');
+        const ws = env.state.sockets[0];
+        ws.readyState = env.FakeWebSocket.OPEN;
+        ws.onopen();
+        const json = JSON.stringify({ type: 'snapshot', gameNumber: 7, phase: 'PLAYING' });
+        ws.onmessage({ data: new TextEncoder().encode(json).buffer });
+        check('NetClient: 消息体为 ArrayBuffer 时也能解析出快照（不能静默丢弃）',
+            snaps.length === 1 && snaps[0].gameNumber === 7, JSON.stringify(snaps));
+        ws.onmessage({ data: json });
+        check('NetClient: 消息体为字符串时行为不变',
+            snaps.length === 2 && snaps[1].gameNumber === 7, String(snaps.length));
+        env.restore();
+    }
+
+    // ---- 29.5 顶栏文案：连不上时必须报出"连的哪台机器 + 失败原因 + 重试次数" ----
+    // 真机上"连不上"是第一现场，但玩家/排查的人都看不到这台机器连的是谁 ——
+    // 顶栏是唯一的输出窗口，它的三分支（有原因 / 离线 / 已连上等数据）必须各自正确。
+    {
+        /** 造一个只够 renderTop 用的实例（不建节点、不跑 onLoad） */
+        function newTopUi() {
+            const ui = new TableUI();
+            ui.snap = null;                                   // 未收到任何快照
+            ui.serverUrl = 'ws://10.192.6.212:8080/ws';
+            ui.mySeat = 'SOUTH';
+            ui.lastNetError = '';
+            // 接管 setTopText 捕获文本：本段测的是 renderTop"决定显示什么"，
+            // 而 setTopText 内部的 layoutTopBar 要摆真实节点（headless 下没有）。
+            ui.topText = '';
+            ui.setTopText = (t) => { ui.topText = t; };
+            ui.setTopTrumpBadge = () => { /* noop */ };
+            ui.renderScoreBar = () => { /* noop */ };
+            return ui;
+        }
+
+        const a = newTopUi();
+        a.net = { online: false, attempts: 4 };
+        a.renderTop();
+        check('顶栏（无快照 + 离线）：显示连不上并带上实际地址',
+            /连接不上/.test(a.topText) && a.topText.includes('10.192.6.212'),
+            a.topText);
+        check('顶栏（无快照 + 离线）：显示已重试次数（真机一眼看出在反复重连）',
+            a.topText.includes('已重试 4 次'), a.topText);
+
+        const b = newTopUi();
+        b.net = { online: false, attempts: 4 };
+        b.lastNetError = '连接超时：8 秒内未建立（readyState=0）';
+        b.renderTop();
+        check('顶栏（有失败原因）：必须显示原因原文，不能只说「连接不上」',
+            b.topText.includes('连接超时') && b.topText.includes('readyState=0'),
+            b.topText);
+
+        const c = newTopUi();
+        c.net = { online: true, attempts: 0 };
+        c.renderTop();
+        check('顶栏（已连上、等快照）：显示「等待服务器数据」而不是「连接不上」',
+            /等待服务器数据/.test(c.topText), c.topText);
+    }
+}
+
+// --- 30. 【2026-09-20 真机 bug】坐庄（收贡人）必须能自己还贡，不能被超时托管代还 ---
+// Tracy 反馈：坐庄那局"没看到给我上贡和让我还贡的操作，直接就开始了，
+// 可明细里已经出现上贡和还贡的牌，我并没有操作"。
+// 两层原因（缺一不可，只修一层按钮照样出不来）：
+//   ① 还贡按钮被写在 `case 'RETURN_TRIBUTE'` 里 —— 服务端 GamePhase **没有**这个阶段，
+//      进贡/还贡/抗贡同属 'TRIBUTE'，那个分支是**永远进不去的死分支**；
+//   ② 就算阶段名对了，它从 `pendingTributes` 里找"收贡人是我" —— 可进贡一交上去，
+//      服务端 `recordTribute` 立刻把这条义务从 `pendingTributes` 摘掉了，那里查不到。
+//   于是收贡人整局没有任何还贡入口；而服务端 `humanWaiter()` 明明返回了他、在等他，
+//   32 秒后超时托管 `doReturnTribute()` 代还 → 直接进扣底。
+// 这组断言锁住"收贡人在 TRIBUTE 阶段看得到还贡按钮、按得出正确命令、还完立刻消失"。
+{
+    const me = newButtonUi().me;                      // 读一下本端座位（默认 SOUTH）
+    const payer = TableUI.ALL_SEATS.find(s => s !== me);
+    const HAND = ['S5', 'H7', 'C9', 'D4'];
+    const CARDS = ['S5', 'H7'];                       // 收到的两张血（= 应还两张）
+    const received = { payer, receiver: me, cards: CARDS };
+    const tributeSnap = (extra) => Object.assign({
+        gameNumber: 2, phase: 'TRIBUTE', dryPot: false, banker: me, yourHand: HAND,
+        pendingTributes: {}, tributes: [received],
+    }, extra || {});
+
+    // (a) 【核心】别人贡给我、我还没还 —— 阶段名就是 'TRIBUTE'，不是 RETURN_TRIBUTE
+    {
+        const r = newPickUi(HAND.slice(), tributeSnap());
+        r.buttons.length = 0; r.ui.btnSig = null; r.ui.renderButtons();
+        check('坐庄收到进贡（phase 仍是 TRIBUTE）→ 收贡人必须看到「还贡」按钮',
+            /还贡/.test(btnTexts(r.buttons)), btnTexts(r.buttons));
+        check('还贡按钮带上应还张数（收 2 张 → 还贡(2张)）',
+            /还贡\(2张\)/.test(btnTexts(r.buttons)), btnTexts(r.buttons));
+        check('收贡人视角不该同时出现「进贡」按钮（他不是进贡人）',
+            !/进贡/.test(btnTexts(r.buttons)), btnTexts(r.buttons));
+    }
+
+    // (b) 没选牌就点 → 只提示、不发命令（与扣王/进贡同一个防呆口径）
+    {
+        const r = newPickUi(HAND.slice(), tributeSnap());
+        r.buttons.length = 0; r.ui.btnSig = null; r.ui.renderButtons();
+        clickBtn(r.buttons, /还贡/);
+        check('没选牌点「还贡」→ 提示且不发命令',
+            r.sent.length === 0 && /先选要还的牌/.test(r.ui.toastLabel.string),
+            `${JSON.stringify(r.sent)} / ${r.ui.toastLabel.string}`);
+    }
+
+    // (c) 选错张数 → 本地就拦下（服务端会以"还贡张数必须等于进贡张数"拒绝，
+    //     本地先拦是为了不让玩家吃一片红字，还能告诉他到底要还几张）
+    {
+        const r = newPickUi(HAND.slice(), tributeSnap());
+        clickHandCard(r.ui, 'S5', 0);
+        r.buttons.length = 0; r.ui.btnSig = null; r.ui.renderButtons();
+        check('选 1 张（应还 2 张）→ 按钮文案仍报「还贡(2张)」',
+            /还贡\(2张\)/.test(btnTexts(r.buttons)), btnTexts(r.buttons));
+        clickBtn(r.buttons, /还贡/);
+        check('张数不足点「还贡」→ 本地拦下并说明要还几张',
+            r.sent.length === 0 && /要还 2 张/.test(r.ui.toastLabel.string),
+            `${JSON.stringify(r.sent)} / ${r.ui.toastLabel.string}`);
+    }
+
+    // (d) 选够 2 张 → 发出 RETURN_TRIBUTE，收件人 = 进贡人（不是自己、也不是庄家兜底）
+    {
+        const r = newPickUi(HAND.slice(), tributeSnap());
+        clickHandCard(r.ui, 'S5', 0);
+        clickHandCard(r.ui, 'H7', 0);
+        r.buttons.length = 0; r.ui.btnSig = null; r.ui.renderButtons();
+        clickBtn(r.buttons, /还贡/);
+        const cmd = r.sent[r.sent.length - 1];
+        check('选够张数点「还贡」→ 发出 RETURN_TRIBUTE',
+            !!cmd && cmd.t === 'RETURN_TRIBUTE', JSON.stringify(r.sent));
+        check('RETURN_TRIBUTE 的 payee 必须是进贡人本人',
+            !!cmd && cmd.p.payee === payer, JSON.stringify(cmd && cmd.p));
+        check('RETURN_TRIBUTE 带的是选中的那两张牌',
+            !!cmd && cmd.p.cards.join(',') === 'S5,H7', JSON.stringify(cmd && cmd.p));
+        check('提交后清空选中（不能把牌留在选中态）', r.ui.selected.length === 0);
+    }
+
+    // (e) 已经还过了（returned 非空）→ 不能再出现还贡按钮（否则点了必被服务端拒）
+    {
+        const r = newPickUi(HAND.slice(), tributeSnap({
+            tributes: [{ payer, receiver: me, cards: CARDS, returned: ['D4', 'C9'] }],
+        }));
+        r.buttons.length = 0; r.ui.btnSig = null; r.ui.renderButtons();
+        check('已还过贡 → 不再出现「还贡」按钮',
+            !/还贡/.test(btnTexts(r.buttons)), btnTexts(r.buttons));
+    }
+
+    // (f) 收贡人是别人（我不是权益人）→ 与我没关系，不该给我按钮
+    {
+        const other = TableUI.ALL_SEATS.find(s => s !== me && s !== payer);
+        const r = newPickUi(HAND.slice(), tributeSnap({
+            tributes: [{ payer: other, receiver: payer, cards: CARDS }],
+        }));
+        r.buttons.length = 0; r.ui.btnSig = null; r.ui.renderButtons();
+        check('我不是收贡人 → 不出现「还贡」按钮',
+            !/还贡/.test(btnTexts(r.buttons)), btnTexts(r.buttons));
+    }
+
+    // (g) 我是进贡人（收贡人的上家）→ 出现「进贡(N张)」，且不能同时给我还贡按钮
+    {
+        const r = newPickUi(HAND.slice(), tributeSnap({
+            banker: payer, pendingTributes: { [me]: { blood: 3, receiver: payer } }, tributes: [],
+        }));
+        r.buttons.length = 0; r.ui.btnSig = null; r.ui.renderButtons();
+        check('轮到我进贡 → 出现「进贡(3张)」（带张数，省得猜要选几张）',
+            /进贡\(3张\)/.test(btnTexts(r.buttons)), btnTexts(r.buttons));
+        check('进贡人视角不该出现「还贡」按钮',
+            !/还贡/.test(btnTexts(r.buttons)), btnTexts(r.buttons));
+
+        clickHandCard(r.ui, 'S5', 0);
+        r.buttons.length = 0; r.ui.btnSig = null; r.ui.renderButtons();
+        clickBtn(r.buttons, /进贡/);
+        check('张数不足点「进贡」→ 本地拦下并说明要贡几张',
+            r.sent.length === 0 && /要贡 3 张/.test(r.ui.toastLabel.string),
+            `${JSON.stringify(r.sent)} / ${r.ui.toastLabel.string}`);
+    }
+
+    // (h) 阶段已经翻页 → 误点必须本地拦下（别让玩家点了才发现牌局已过）
+    {
+        const r = newPickUi(HAND.slice(), tributeSnap());
+        clickHandCard(r.ui, 'S5', 0);
+        clickHandCard(r.ui, 'H7', 0);
+        r.buttons.length = 0; r.ui.btnSig = null; r.ui.renderButtons();
+        r.ui.snap = Object.assign({}, r.ui.snap, { phase: 'BURYING' });   // 期间被托管代还了
+        clickBtn(r.buttons, /还贡/);
+        check('按钮渲染后阶段已翻页 → 本地拦下，不发无效命令',
+            r.sent.length === 0 && /还贡阶段已经结束/.test(r.ui.toastLabel.string),
+            `${JSON.stringify(r.sent)} / ${r.ui.toastLabel.string}`);
+    }
+
+    // (i) 【签名制】未还 → 已还 必须让按钮签名变化，否则按钮会赖在桌上不走
+    {
+        const r = newPickUi(HAND.slice(), tributeSnap());
+        const sigBefore = r.ui.buttonSignature(true, r.ui.snap);
+        r.ui.snap = Object.assign({}, r.ui.snap, {
+            tributes: [{ payer, receiver: me, cards: CARDS, returned: ['D4', 'C9'] }],
+        });
+        const sigAfter = r.ui.buttonSignature(true, r.ui.snap);
+        check('签名把「还贡对象 + 张数」算进去了（未还 → 已还 必须换签名）',
+            sigBefore !== sigAfter, `${sigBefore} vs ${sigAfter}`);
+    }
+
+    // (j) 一局两笔血（分差血 + 扣王血，收贡人还不是同一家）→ 第一笔还完，
+    //     按钮必须立刻切到第二笔：对象与张数都得进签名，否则按钮不会重建
+    {
+        const other = TableUI.ALL_SEATS.find(s => s !== me && s !== payer);
+        const onlyFirst = newPickUi(HAND.slice(), tributeSnap({
+            tributes: [{ payer, receiver: me, cards: ['S5'], returned: ['D4'] }],  // 已还 → 无事可做
+        }));
+        const two = newPickUi(HAND.slice(), tributeSnap({
+            tributes: [
+                { payer, receiver: me, cards: ['S5'], returned: ['D4'] },          // 第一笔：已还
+                { payer: other, receiver: me, cards: ['H7', 'C9'] },               // 第二笔：待还
+            ],
+        }));
+        two.buttons.length = 0; two.ui.btnSig = null; two.ui.renderButtons();
+        check('第一笔已还、第二笔待还 → 按钮切到第二笔（还贡(2张)）',
+            /还贡\(2张\)/.test(btnTexts(two.buttons)), btnTexts(two.buttons));
+
+        const sigIdle = onlyFirst.ui.buttonSignature(true, onlyFirst.ui.snap);
+        const sigTwo = two.ui.buttonSignature(true, two.ui.snap);
+        check('换了一笔血（对象 + 张数都变）→ 签名必须不同，否则按钮不会重建',
+            sigIdle !== sigTwo, `${sigIdle} vs ${sigTwo}`);
+    }
 }
 
 console.log('=================================================');
