@@ -33,8 +33,8 @@
 
 - **规则手册** v1.1 定稿冻结（12 项决议全部拍板）
 - **后端**（`server/`，Maven 多模块，JDK 17）：
-  - `game-domain` 领域模型：牌 / 牌值比较 / 发牌 / 命令模式 / 计分 / 进贡血数（**126 个**单元测试全绿）
-  - `game-room` Netty 战斗服：3 个 bot + 真人 NORTH 演示入口（`ws://localhost:8080/ws`）
+  - `game-domain` 领域模型：牌 / 牌值比较 / 发牌 / 命令模式 / 计分 / 进贡血数（**136 个**单元测试全绿，17 个测试类）
+  - `game-room` Netty 战斗服：3 个 bot + 真人 NORTH 演示入口（`ws://localhost:8080/ws`）（**50 个**单元测试，10 个测试类；其中 2 个 Redis 用例在本机没起 Redis 时 Skipped，属正常）
 - **客户端**（`client/`，Cocos Creator 3.8.8）：
   - 牌桌 UI 全套（TableUI / CardUI / 手牌排序 / 墩牌可视化 / 动画 / 局结算面板）
   - 网络层（WebSocket 心跳 / 指数退避重连 / token 管理）
@@ -51,7 +51,7 @@
 
 - 远程 `origin/main` 已推送到 `e0722bd`（含 `.gitattributes` 强制 LF、`main.scene.meta` uuid 小写、`build-wechatgame.sh` 一键构建 + 主包瘦身至 1.73MB）。
 - **团队现在 clone 即可拿到修复版**，无需等任老师补 push。
-- 任老师本地仅剩**文档自身的测试数修正**未提交（无代码阻塞）。
+- 本指南的测试数已于 **2026-09-21 校准**（36 / 126 / 142 → **186**，见 §5），无遗留文档阻塞。
 
 ---
 
@@ -106,7 +106,9 @@ cd gunzi-hall
 
 ```powershell
 cd server
-mvn test        # 142 个单元测试（game-domain 126 + game-room 16，2 个 Redis 相关本机无 Redis 时跳过），全绿即环境 OK
+mvn test        # 186 个单元测试（game-domain 136 + game-room 50），全绿即环境 OK
+                # 其中 game-room 的 2 个 Redis 用例在本机没起 Redis 时显示 Skipped，属正常，不算失败
+                # （2026-09-21 校准：旧文档写的 36 / 126 / 142 都已过时）
 ```
 
 启动战斗服（3 bot + 真人 NORTH 演示）：
@@ -117,6 +119,16 @@ mvn -pl game-room exec:java -Dexec.mainClass=com.gunzihall.room.ServerMain -Dexe
 ```
 
 > 控制台出现 bot 自动开局 / 出牌日志即成功。战斗服监听 `ws://localhost:8080/ws`。
+
+> ⚠️ **`exec:java` 不会编译 —— 改完 Java 必须先构建再启动**：
+> `exec:java` 只做一件事：在 JVM 里跑一个 main 方法。它**不触发 `compile` 阶段**（实测整个执行序列里只有 `exec:java` 一行、0.7 秒结束，没有任何 `maven-compiler-plugin`）。所以"改完源码直接 `exec:java`"跑的仍是**上一次编译出来的 class**，新规则永远不生效，表现为"代码明明改了、游戏里没变"。更隐蔽的一层：`-pl game-room` 是**单模块**运行，`game-domain` 会被从本地仓库（`~/.m2`）解析成 jar，**不读** `server/game-domain/target/classes` —— 只 compile 不 install，等于白改（庄家轮换那次就是这么被咬的）。
+>
+> 改过 `server/**/src/main/**` 后先构建：
+> ```powershell
+> cd server
+> mvn -DskipTests install        # 增量，通常十几秒；game-domain 必须 install 才会进 .m2
+> ```
+> 嫌麻烦就直接**双击 `启动-滚子大厅.bat`**：它会自动比对"最新源码 vs 编译产物 / 上次构建时间"，过期才重构、没过期就跳过（判定逻辑在 `tools/ensure-server-built.ps1`）。注意端口被占用时启动脚本**只报忙、不重启**，旧进程里的仍是旧代码，要先跑停止脚本。
 
 > ⚠️ **一个房间目前只支持 1 个真人**：`ServerMain` 把**除 `SOUTH` 以外的三个座位**交给 bot，**只有 SOUTH 留给真人**（`SOUTH` 是 `ServerMain.DEFAULT_HUMAN_SEAT`，可用启动参数覆盖：`-Dexec.args="8080 1001 WEST"`）。所以**两个人不要同时连同一个战斗服**（会抢 SOUTH 座位、互相把对方踢下线）。**各自在自己电脑上跑各自的战斗服即可，互不影响**。
 >
@@ -285,7 +297,7 @@ cd client
 | `client/build-wechatgame.sh`（§7 构建脚本） | ✅ 已在 `e0722bd` |
 | `main.scene.meta` uuid 小写 | ✅ 已在 `e0722bd`（大写 uuid 黑屏雷已消除） |
 
-> 任老师本地当前**无代码层阻塞**；仅本指南的测试数（36→142）等措辞修正尚未提交，不影响 clone。
+> 任老师本地当前**无代码层阻塞**；本指南的测试数已于 **2026-09-21 校准**（36 → 186，见 §5），不影响 clone。
 
 ### 9.1 协作方式已定：GitHub 协作者 + PR（详见 §11）
 

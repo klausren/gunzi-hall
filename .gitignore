@@ -39,6 +39,9 @@ runs/
 停止日志.txt
 静态服务器日志.txt
 
+# 服务端构建标记（tools/ensure-server-built.ps1 自动生成，用于判断是否需要重建）
+server/.last-build-stamp
+
 # 环境与密钥（绝不提交）
 .env
 .env.*

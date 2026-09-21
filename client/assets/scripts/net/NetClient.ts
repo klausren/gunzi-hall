@@ -43,6 +43,28 @@ export class NetClient {
     private static readonly MAX_RECONNECT_MS = 15_000; // 退避上限 15s
     private manuallyClosed = false;
 
+    // ---- 建连自检（平台无关兜底） ----
+    /**
+     * 建连超时自检定时器。
+     *
+     * <p>【为什么必须有】浏览器里连接失败一定会触发 onerror + onclose，所以"靠 onclose
+     * 收尾"一直够用。但小游戏平台不是：`wx.connectSocket` 在域名不合法、网关丢包、
+     * 超时等情况下**可能只回调 onError，既不回调 onOpen 也不回调 onClose**
+     * （小游戏适配层把平台事件原样透传，见构建产物里的 web-adapter）。
+     * 此时连接对象会永远停在 CONNECTING，而 UI 只能靠 stateHandler 事件更新——
+     * 于是顶栏永远停在构造时的"连接中…"（2026-09-20 真机实测就是这个症状，
+     * 玩家和排错的人都只能干看着，连"连的是哪台机器"都看不到）。
+     * 这里用一个与平台无关的计时器兜底：到时仍未连上就主动判定失败、把原因交给 UI。
+     */
+    private connectTimer: number | null = null;
+    private static readonly CONNECT_TIMEOUT_MS = 8_000;
+
+    /** 已发起的连接次数（含重连），顶栏用来显示"已重试 N 次" */
+    private attemptCount = 0;
+
+    /** 最近一次可展示的连接失败原因（来自 onerror / 构造异常 / 超时自检） */
+    private lastErrorDetail = '';
+
     // ---- 回调 ----
     private snapshotHandler: ((s: SnapshotMsgDown) => void) | null = null;
     private eventHandler: ((e: EventMsg) => void) | null = null;
@@ -65,6 +87,16 @@ export class NetClient {
     get online(): boolean {
         return this.ws != null && this.ws.readyState === WebSocket.OPEN;
     }
+
+    /** 已发起的连接次数（含重连）。顶栏显示"已重试 N 次"，让真机上一眼看出在反复重连 */
+    get attempts(): number { return this.attemptCount; }
+
+    /**
+     * 最近一次连接失败原因（无失败时为空串）。
+     *
+     * <p>平台只给 onerror 不给 onclose 时，这是 UI 唯一能拿到的线索 —— 不能丢。
+     */
+    get lastError(): string { return this.lastErrorDetail; }
 
     /** 建连并入座（重连场景同房同座位再 join，服务端自动恢复快照） */
     join(roomId: number, playerId: number, seat: SeatName): void {
@@ -97,6 +129,7 @@ export class NetClient {
         this.manuallyClosed = true;
         this.stopHeartbeat();
         this.stopReconnect();
+        this.stopConnectTimer();
         this.ws?.close();
         this.ws = null;
         this.stateHandler?.(false);
@@ -109,6 +142,7 @@ export class NetClient {
     reconnectNow(): void {
         this.stopHeartbeat();
         this.stopReconnect();
+        this.stopConnectTimer();
         this.reconnectAttempts = 0;
         this.manuallyClosed = false;
         const old = this.ws;
@@ -122,19 +156,32 @@ export class NetClient {
     private connect(): void {
         this.stopHeartbeat();
         this.stopReconnect();
+        this.stopConnectTimer();
+        this.attemptCount++;
         let ws: WebSocket;
         try {
             ws = new WebSocket(this.url);
         } catch (e) {
-            this.scheduleReconnect();
+            // 构造阶段就失败（URL 非法等）：原实现只排重连、不通知 UI，
+            // 顶栏会永远停在"连接中…"。原因必须交出去，否则真机无从排查。
+            this.failConnect(`无法创建连接：${(e as Error)?.message ?? String(e)}`);
             return;
         }
         this.ws = ws;
+        // 建连自检：到时仍未 OPEN 就自己判失败（成因见 connectTimer 字段注释）
+        this.connectTimer = setTimeout(() => {
+            if (this.ws !== ws || ws.readyState === WebSocket.OPEN) return;
+            this.failConnect(`连接超时：${NetClient.CONNECT_TIMEOUT_MS / 1000} 秒内未建立`
+                + `（readyState=${ws.readyState}）`);
+        }, NetClient.CONNECT_TIMEOUT_MS) as unknown as number;
         // 所有回调都先校验"我是不是当前这条连接"：避免旧连接的 onclose
         // 触发新连接的 scheduleReconnect（双连接 / 状态被旧连接回滚）。
         ws.onopen = () => {
             if (this.ws !== ws) return;
+            this.stopConnectTimer();     // 已连上：撤掉建连自检
             this.reconnectAttempts = 0;
+            this.attemptCount = 0;       // 连上即清零，顶栏不再显示"已重试 N 次"
+            this.lastErrorDetail = '';
             this.missedPong = 0;
             this.stateHandler?.(true);
             // 连上即（重）入座：服务端凭 roomId+playerId 识别重连，发回快照与新 token
@@ -145,10 +192,11 @@ export class NetClient {
         };
         ws.onmessage = (ev: MessageEvent) => {
             if (this.ws !== ws) return;
-            this.handleMessage(String(ev.data));
+            this.handleMessage(decodeMessageData(ev.data));
         };
         ws.onclose = () => {
             if (this.ws !== ws) return;
+            this.stopConnectTimer();
             this.stateHandler?.(false);
             this.stopHeartbeat();
             this.token = null; // 连接已断，token 随新连接重新签发
@@ -157,7 +205,17 @@ export class NetClient {
                 this.scheduleReconnect();
             }
         };
-        ws.onerror = () => { /* onclose 会跟着触发，统一在 onclose 处理 */ };
+        ws.onerror = (ev?: unknown) => {
+            if (this.ws !== ws) return;
+            // 【不能留空】原实现的注释是"onclose 会跟着触发"——这在浏览器成立，
+            // 在小游戏不成立：wx.connectSocket 遇到域名不合法 / 连接超时 / 网关丢包时
+            // **只回调 onError**，既不回调 onOpen 也不回调 onClose。留空就等于把
+            // 失败原因整个吞掉，UI 永远停在"连接中…"（2026-09-20 真机实测症状）。
+            // 这里立即判失败：failConnect 会先摘掉 this.ws，随后的 onclose 会自我忽略，
+            // 不会重复调度重连。
+            const msg = (ev as { message?: string } | undefined)?.message;
+            this.failConnect(msg ? `连接出错：${msg}` : '连接出错（平台未给出原因）');
+        };
     }
 
     private startHeartbeat(): void {
@@ -195,6 +253,31 @@ export class NetClient {
             clearTimeout(this.reconnectTimer);
             this.reconnectTimer = null;
         }
+    }
+
+    private stopConnectTimer(): void {
+        if (this.connectTimer != null) {
+            clearTimeout(this.connectTimer);
+            this.connectTimer = null;
+        }
+    }
+
+    /**
+     * 判定当前连接失败：把原因交给 UI、摘掉引用、按退避重排重连。
+     *
+     * <p>【顺序要紧】先 errorHandler（写 lastNetError）再 stateHandler（触发 renderTop）。
+     * 反过来的话 renderTop 走的是 `online === false` 那条笼统分支，
+     * 具体原因（超时 / 平台报错）就被吞掉了 —— 而排错时这句话最值钱。
+     */
+    private failConnect(reason: string): void {
+        this.stopConnectTimer();
+        this.lastErrorDetail = reason;
+        this.errorHandler?.(reason);
+        this.stateHandler?.(false);
+        const old = this.ws;
+        this.ws = null;              // 先摘引用：旧连接的 onclose 会因此自我忽略，不会重复调度
+        try { old?.close(); } catch { /* ignore */ }
+        this.scheduleReconnect();
     }
 
     // ==================== 消息处理 ====================
@@ -244,4 +327,54 @@ export class NetClient {
             this.ws.send(JSON.stringify(obj));
         }
     }
+}
+
+/**
+ * 把平台交给 onmessage 的 data 统一成字符串。
+ *
+ * <p>【为什么需要】浏览器发文本帧时 `MessageEvent.data` 一定是 string，
+ * 所以 `String(ev.data)` 一直没暴露问题。但小游戏平台的 WebSocket 适配层
+ * 是把平台原生事件对象**原样透传**给 onmessage 的（见构建产物 web-adapter 里的
+ * `r.onMessage(function(e){ t.onmessage(e) })`），其 `data` 类型由平台决定：
+ * 二进制帧 / binaryType 为 arraybuffer 时会是 ArrayBuffer。
+ * 此时 `String(data)` 得到的是 `"[object ArrayBuffer]"`，`JSON.parse` 抛异常后
+ * 被静默 `return` —— 表现为"连接一切正常，但永远收不到任何快照"，
+ * 是最难定位的一类问题。这里统一解码，彻底消掉这个分支。
+ */
+function decodeMessageData(data: unknown): string {
+    if (typeof data === 'string') return data;
+    if (data instanceof ArrayBuffer) return utf8Decode(new Uint8Array(data));
+    if (ArrayBuffer.isView(data)) {
+        const v = data as ArrayBufferView;
+        return utf8Decode(new Uint8Array(v.buffer, v.byteOffset, v.byteLength));
+    }
+    return String(data);
+}
+
+/** UTF-8 解码：优先平台原生 TextDecoder，小游戏环境不保证有时退回手写实现 */
+function utf8Decode(bytes: Uint8Array): string {
+    const TD = (globalThis as {
+        TextDecoder?: new (label?: string) => { decode(input: Uint8Array): string };
+    }).TextDecoder;
+    if (TD) {
+        try { return new TD('utf-8').decode(bytes); } catch { /* 落到手写实现 */ }
+    }
+    let out = '';
+    for (let i = 0; i < bytes.length;) {
+        const b = bytes[i];
+        if (b < 0x80) { out += String.fromCharCode(b); i += 1; continue; }
+        let n = 0;
+        let cp = 0;
+        if ((b & 0xe0) === 0xc0) { n = 1; cp = b & 0x1f; }
+        else if ((b & 0xf0) === 0xe0) { n = 2; cp = b & 0x0f; }
+        else if ((b & 0xf8) === 0xf0) { n = 3; cp = b & 0x07; }
+        else { out += '\ufffd'; i += 1; continue; }
+        if (i + n >= bytes.length) { out += '\ufffd'; break; }
+        for (let k = 1; k <= n; k++) cp = (cp << 6) | (bytes[i + k] & 0x3f);
+        i += n + 1;
+        out += cp > 0xffff
+            ? String.fromCharCode(0xd800 + ((cp - 0x10000) >> 10), 0xdc00 + ((cp - 0x10000) & 0x3ff))
+            : String.fromCharCode(cp);
+    }
+    return out;
 }

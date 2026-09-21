@@ -22,7 +22,9 @@ export class NetTest extends Component {
 
     // 兜底地址：只在拿不到 location 的环境生效（微信小游戏、编辑器预览）。
     // Web 端运行时自动探测，换 WiFi 无需再改三处（见 net/ServerUrl.ts）。
-    // 临时覆盖：页面 URL 后加 ?server=ws://host:8080/ws
+    // 临时覆盖：页面 URL 后加 ?server=ws://<host>:8080/ws
+    // （用尖括号占位：构建脚本会按 ws://<字母数字.- >:8080/ws 的模式批量替换本机 IP，
+    //   写成真地址会把注释也一起改掉，导致源码反复变脏。）
     @property
     serverUrl = 'ws://127.0.0.1:8080/ws';
 

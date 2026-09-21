@@ -26,10 +26,19 @@ import com.gunzihall.domain.trump.TrumpContext;
  *
  * <p>干锅局（手册 2.3.7）：底牌王不算血、不追加升级，进贡只按分差折算。
  *
- * <p>接庄方向（手册 4.3 原本只写"抓分方上台坐庄"、未指明由谁接）：抓分方上台后，
- * 新庄家 = 原庄家的<b>下家</b>（{@link Seat#next()}，出牌逆时针方向）。
- * 连带影响"庄家方进贡给新庄家"的执行人 —— 规则是"新庄家的上家"，
- * 于是恰好落回原庄家本人。护栏：{@code SettleRoundCommandTest}。
+ * <p><b>接庄方向（手册 4.3 / Q9，2026-09-20 补全第二条）</b>：
+ * 手册 4.3 只写"抓分方上台坐庄"与"下局庄家方继续坐庄"，都没点明由哪一家接。按 QQ 官方
+ * 「打滚子」规则补全为：
+ * <ul>
+ *   <li>抓分方得分 <b>≥120</b>（上台）→ 新庄家 = 原庄家的<b>下家</b>
+ *       （{@link Seat#next()}，出牌逆时针方向的下一家）；</li>
+ *   <li>抓分方得分 <b>&lt;120</b>（未上台）→ 新庄家 = 原庄家的<b>对家</b>
+ *       （{@link Seat#partner()}）—— "庄家方继续坐庄"指的是庄家方这<b>两个人</b>，
+ *       继续坐庄的那一位是庄家的对家。</li>
+ * </ul>
+ * 连带影响进贡：收贡人一律是<b>下一局的庄家</b>，执行人 = 新庄家的上家
+ * （抓分方上台时它恰好落回原庄家本人，见 Q9）。
+ * 护栏：{@code SettleRoundCommandTest}。
  */
 public final class SettleRoundCommand extends AbstractGameCommand {
 
@@ -96,10 +105,21 @@ public final class SettleRoundCommand extends AbstractGameCommand {
         }
 
         // ---- 下一局：级数/庄家/进贡义务 ----
-        // 抓分方上台坐庄时，由原庄家的【下家】接庄（手册 4.3；该方向曾缺失，2026-09-18 确认）。
-        // 坑：next() 是"出牌方向的下一家"（逆时针 N→W→S→E），**不等于** index+1；
-        // 若误写成 previous()（上家接庄），玩家一眼就能看出来，护栏见 SeatDirectionTest。
-        Seat newBanker = result.attackerTakesBank() ? bankerSeat.next() : bankerSeat;
+        // 庄家轮换两条分支（手册 4.3 + Q9；2026-09-20 补全第二条）：
+        //   ① 抓分方 ≥120（上台）   → 新庄家 = 原庄家的【下家】（next()，出牌逆时针下一家）
+        //   ② 抓分方 <120（未上台） → 新庄家 = 原庄家的【对家】（partner()）
+        //
+        // 【坑 1：方向】next()/previous() 是"出牌方向"（逆时针 N→W→S→E），**不等于** index±1。
+        // 【坑 2：本行曾错】分支 ② 旧写法是 `bankerSeat`（原庄家自己连庄）—— 错。
+        //   手册 4.3 原文写的是「下局**庄家方**继续坐庄」，而庄家方 = 庄家 + 对家**两个人**；
+        //   继续坐庄的是**对家**。QQ 官方「打滚子」规则原文更直白：
+        //     「抓分方得分小于120时，下局由本局庄家的**对家**做庄家；
+        //       抓分方得分大于等于120时，下一局由本局庄家的**下家**当庄家。」
+        //   症状：庄家方赢了，下一局"庄"瓦片还挂在原庄家的铭牌旁，玩家一眼就看出来。
+        //   翻牌定庄那两条路（RevealTrumpCommand / ResolveTrumpFromBottomCommand）都只在
+        //   第一局才 setBankerSeat，第二局起不再改庄家 —— 所以这里是唯一的换庄点。
+        //   护栏：SettleRoundCommandTest#bankerHolds_attackerBelowLine_partnerTakesBank
+        Seat newBanker = result.attackerTakesBank() ? bankerSeat.next() : bankerSeat.partner();
 
         room.setCurrentLevel(nextLevel);
         room.setBankerSeat(newBanker);
@@ -107,14 +127,18 @@ public final class SettleRoundCommand extends AbstractGameCommand {
         room.setGameNumber(room.gameNumber() + 1);
         room.resetRoundState(); // 先清局内状态（含旧进贡义务）
 
+        // 进贡的【收贡人一律是下一局的庄家 newBanker】—— 进贡发生在下一局抓牌完成后、拿底牌之前
+        // （手册 3.5），那个时点上"庄家"只能是新庄家；执行人 = 新庄家的上家（Q4/Q9）。
+        // 因此这里必须用 newBanker，不能用本局的 bankerSeat —— 否则分支 ② 换到对家后，
+        // 贡会进错人（进给已经卸任的旧庄家）。
         int defBlood = bloodOf(tribute, TributeCalculator.Payer.DEFENDER);
         int bankBlood = bloodOf(tribute, TributeCalculator.Payer.BANKER);
         if (defBlood > 0) {
-            // 抓分方进贡给庄家：执行人 = 庄家上家（Q4）
-            room.putTributeObligation(bankerSeat.previous(),
-                    new TributeObligation(defBlood, bankerSeat));
+            // 分差血 / 保底扣王血：抓分方进贡给新庄家（Q4）
+            room.putTributeObligation(newBanker.previous(),
+                    new TributeObligation(defBlood, newBanker));
         } else if (bankBlood > 0) {
-            // 庄家方进贡给新庄家（抓分方已上台）：执行人 = 新庄家上家
+            // 高分血 / 抠底扣王血：庄家方进贡给新庄家（Q9：执行人恰好落回原庄家本人）
             room.putTributeObligation(newBanker.previous(),
                     new TributeObligation(bankBlood, newBanker));
         }

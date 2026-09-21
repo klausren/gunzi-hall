@@ -65,13 +65,15 @@ class SettleRoundCommandTest {
         assertTrue(s.bankerPromoted(), "<120 且保底 → 庄家方升级");
         assertFalse(s.attackerTakesBank());
 
-        // 升级：3 → 4；庄家不变（北）；抓分方进贡 4 血给北家，执行人 = 北上家（东）
-        // （出牌逆时针，上家 = 东；见 SeatDirectionTest）
+        // 升级：3 → 4；抓分方 <120 未上台 → 新庄家 = 原庄家（北）的【对家】= 南
+        // （手册 4.3「下局庄家方继续坐庄」：庄家方 = 庄家 + 对家两人，继续坐庄的是对家）
+        // 抓分方进贡 4 血给**新庄家南**，执行人 = 南的上家 = 西（出牌逆时针，见 SeatDirectionTest）
         assertEquals(4, room.currentLevel());
-        assertEquals(Seat.NORTH, room.bankerSeat().orElseThrow());
-        var ob = room.pendingTributes().get(Seat.EAST);
+        assertEquals(Seat.SOUTH, room.bankerSeat().orElseThrow(),
+                "<120 未上台：应由原庄家的【对家】接庄");
+        var ob = room.pendingTributes().get(Seat.WEST);
         assertEquals(4, ob.bloodCount());
-        assertEquals(Seat.NORTH, ob.receiver());
+        assertEquals(Seat.SOUTH, ob.receiver(), "收贡人 = 新庄家（对家），不是已卸任的旧庄家");
         assertEquals(GamePhase.DEALING, room.phase(), "未出锅 → 直接开新局");
     }
 
@@ -126,6 +128,40 @@ class SettleRoundCommandTest {
             assertEquals(banker.next(), r.bankerSeat().orElseThrow(),
                     banker + " 坐庄、抓分方上台后，应由原庄家的【下家】接庄");
             assertEquals(GamePhase.DEALING, r.phase(), "未出锅 → 直接开新局");
+        }
+    }
+
+    @Test
+    void bankerHolds_attackerBelowLine_partnerTakesBank() {
+        // 2026-09-20 修：抓分方 <120（未上台）时，新庄家 = 原庄家的【对家】，不是原庄家自己。
+        // 依据：手册 4.3 原文是「下局**庄家方**继续坐庄」，而庄家方 = 庄家 + 对家两个人，
+        //      继续坐庄的那位是庄家的对家；QQ 官方「打滚子」规则原文更直白：
+        //      「抓分方得分小于120时，下局由本局庄家的【对家】做庄家」。
+        // 本次修之前这里写的是 `bankerSeat`（原庄家自己连庄），玩家侧症状 =
+        // 庄家方赢了，下一局"庄"瓦片还挂在原庄家的铭牌旁。四座位逐一验证，写回旧值四条全红。
+        for (Seat banker : Seat.values()) {
+            GameRoom r = RevealTrumpCommandTest.fullRoom();
+            Team attacker = banker.team().opponent();
+            // 抓分方 40 分（<80）+ 庄家方保底 → 不上台、庄家方升级、抓分方按分差进贡 4 血
+            prepSettlingOn(r, 3, Map.of(attacker, 40),
+                    List.of(Card.of(Suit.CLUB, 4), Card.of(Suit.CLUB, 8),
+                            Card.of(Suit.DIAMOND, 3), Card.of(Suit.SPADE, 11),
+                            Card.of(Suit.SPADE, 13), Card.of(Suit.CLUB, 12)),
+                    banker.team(), banker);
+
+            assertTrue(r.apply(new SettleRoundCommand(1001L, 1L)).success(), banker + " 坐庄：结算应成功");
+            assertFalse(r.lastSettlement().orElseThrow().attackerTakesBank(),
+                    banker + " 坐庄：抓分方 40 分 < 120，不该上台");
+
+            assertEquals(banker.partner(), r.bankerSeat().orElseThrow(),
+                    banker + " 坐庄、抓分方未上台：应由原庄家的【对家】接庄");
+
+            // 进贡必须进给**新庄家（对家）**，执行人 = 新庄家的上家；
+            // 若仍按旧庄家算收贡人，贡会进给已经卸任的那一位
+            var ob = r.pendingTributes().get(banker.partner().previous());
+            assertEquals(4, ob.bloodCount(), banker + " 坐庄：(80-40)/10 = 4 血");
+            assertEquals(banker.partner(), ob.receiver(),
+                    banker + " 坐庄：收贡人必须是新庄家（对家）");
         }
     }
 
@@ -189,8 +225,9 @@ class SettleRoundCommandTest {
         assertTrue(room.apply(new SettleRoundCommand(1001L, 1L)).success());
 
         // 分差血 (80-40)/10 = 4；王血因干锅作废
-        // 执行人 = 庄家北的上家 = 东
-        var ob = room.pendingTributes().get(Seat.EAST);
+        // 新庄家 = 北的对家 = 南；执行人 = 南的上家 = 西
+        var ob = room.pendingTributes().get(Seat.WEST);
         assertEquals(4, ob.bloodCount());
+        assertEquals(Seat.SOUTH, ob.receiver());
     }
 }
