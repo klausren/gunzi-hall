@@ -34,12 +34,15 @@ server/         后端工程（Maven 多模块，Sprint 1 起）
 
 ```bash
 cd server
-mvn test   # JDK 17 + Maven 3.9+，36 个单元测试
+mvn test   # JDK 17 + Maven 3.9+，186 个单元测试（game-domain 136 + game-room 50）
 ```
 
-当前模块：`game-domain` —— 领域模型（牌/牌值比较器/发牌/命令模式/计分/进贡血数），
-唯一规则依据为已冻结的规则手册 v1.1。后续模块按 WBS 陆续加入：
-`game-room`（Netty 战斗服）、`game-account`、`game-ai`、`game-common`。
+当前模块：
+- `game-domain` —— 领域模型（牌 / 牌值比较器 / 发牌 / 命令模式 / 计分 / 进贡血数），
+  唯一规则依据为已冻结的规则手册 v1.1
+- `game-room` —— Netty 战斗服（房间编排 / bot 托管 / 每条命令后推全量快照 / 断线重连恢复）
+
+后续按 WBS 陆续加入：`game-account`、`game-ai`、`game-common`。
 
 ## 📊 项目图集（甲方可直达）
 
