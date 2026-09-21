@@ -14,7 +14,7 @@ Gunzi Hall PR 模板。提交 PR 时 GitHub 会自动载入本模板。
 | `路径/文件` | 说明 |
 
 ## 三、验证方式（任老师 review 时会照做，务必填真实结果）
-- [ ] `cd server && mvn test` 全绿（预期 game-domain 126 + game-room 16，2 个 Redis 相关本机无 Redis 时跳过）
+- [ ] `cd server && mvn test` 全绿（预期 game-domain 136 + game-room 50 = 186，2 个 Redis 相关本机无 Redis 时跳过）
 - [ ] 如涉及并发 / 异步：相关模块连跑 **5 次以上**无 flaky（贴最后一次 `BUILD SUCCESS`）
 - [ ] 如涉及客户端：`serverUrl` 改回 `ws://localhost:8080/ws` 后 Cocos 预览通过
 - [ ] 如涉及微信小游戏构建：走 `build-wechatgame.sh`（macOS）/ `build-wechatgame.ps1`（Windows），并核对 §8.1 / §8.2 / §8.4 三铁律
