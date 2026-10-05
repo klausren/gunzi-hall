@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 780" width="1180" height="780">
+<title>图 5  活动图 —— 开局流程（入座 → 定主 → 扣底）</title>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="#94A3B8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="#1D4ED8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#4B5563"/></marker></defs>
+<rect width="1180" height="780" fill="#FFFFFF"/>
+<text x="48" y="46" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="21" font-weight="600" fill="#1F2937">图 5  活动图 —— 开局流程（入座 → 定主 → 扣底）</text>
+<text x="48" y="70" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" fill="#6B7280">从入座到扣底的动作与判定；右侧为「否」分支的处理动作（来源：RoomActor.stepBidding / stepTribute / stepBury）</text>
+<circle cx="340" cy="118" r="9" fill="#1F2937"/>
+<line x1="340" y1="127" x2="340" y2="150" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<rect x="110" y="150" width="460" height="56" rx="10" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1.2"/>
+<text x="340.0" y="182.16666666666666" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1E3A8A" text-anchor="middle">扫码进入 → 自动入座（3 个 bot 已就位）</text>
+<rect x="110" y="228" width="460" height="56" rx="10" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1.2"/>
+<text x="340.0" y="260.1666666666667" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1E3A8A" text-anchor="middle">点「新局」：hardResetToWaiting() → 发牌 39×4 + 底 6</text>
+<rect x="110" y="306" width="460" height="56" rx="10" fill="#E7F6EF" stroke="#047857" stroke-width="1.2"/>
+<text x="340.0" y="338.1666666666667" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#065F46" text-anchor="middle">[BIDDING] 选级牌亮主 / 反主（2 反 1、3 反 2、王叫任意花色）</text>
+<path d="M340 384.0L470.0 428.0L340 472.0L210.0 428.0Z" fill="#FDF0E3" stroke="#B45309" stroke-width="1.2"/>
+<text x="340" y="432.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#7C2D12" text-anchor="middle">有人亮主且确认定主？</text>
+<rect x="110" y="496" width="460" height="56" rx="10" fill="#E7F6EF" stroke="#047857" stroke-width="1.2"/>
+<text x="340.0" y="528.1666666666666" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#065F46" text-anchor="middle">[TRIBUTE] 进贡 / 还贡（首局或上局无血则跳过）</text>
+<rect x="110" y="574" width="460" height="56" rx="10" fill="#E7F6EF" stroke="#047857" stroke-width="1.2"/>
+<text x="340.0" y="606.1666666666666" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#065F46" text-anchor="middle">[BURYING] 庄家选恰好 6 张扣底（张数不对则提示）</text>
+<line x1="340" y1="206" x2="340" y2="228" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<line x1="340" y1="284" x2="340" y2="306" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<line x1="340" y1="362" x2="340" y2="384.0" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<line x1="340" y1="472.0" x2="340" y2="496" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<line x1="340" y1="552" x2="340" y2="574" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<line x1="340" y1="630" x2="340" y2="658" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<circle cx="340" cy="670" r="11" fill="none" stroke="#1F2937" stroke-width="1.6"/>
+<circle cx="340" cy="670" r="6" fill="#1F2937"/>
+<text x="364" y="675" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="600" fill="#4B5563" text-anchor="start">转入出牌阶段（见图 6）</text>
+<line x1="470.0" y1="428.0" x2="680" y2="428.0" stroke="#B45309" stroke-width="1.4" marker-end="url(#a)"/>
+<text x="510.0" y="420.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#B45309" text-anchor="middle">否</text>
+<rect x="680" y="399.0" width="460" height="58" rx="10" fill="#FDF0E3" stroke="#B45309" stroke-width="1.2"/>
+<text x="910.0" y="432.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="600" fill="#7C2D12" text-anchor="middle">未定主：等 bot 亮主 / 超时托管代打</text>
+<text x="690" y="480.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">↩ 回到 BIDDING（首局为抢亮大王）</text>
+<rect x="680" y="504.0" width="460" height="48" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1"/>
+<text x="692" y="526.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">首局特殊：抢亮大王（非级牌）；第二局起亮主必须用级牌（打 3 亮 3）。反主规则：2</text>
+<text x="692" y="542.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">个反 1 个、3 个反 2 个；3 个王可叫任意花色，大王叫牌权优于小王。</text>
+</svg>

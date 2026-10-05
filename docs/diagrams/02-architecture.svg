@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 1080" width="1180" height="1080">
+<title>图 2  系统技术架构图</title>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="#94A3B8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="#1D4ED8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#4B5563"/></marker></defs>
+<rect width="1180" height="1080" fill="#FFFFFF"/>
+<text x="48" y="46" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="21" font-weight="600" fill="#1F2937">图 2  系统技术架构图</text>
+<text x="48" y="70" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" fill="#6B7280">五层架构：客户端 → 接入 → 应用 → 领域 / 存储。类名与包结构全部取自真实代码</text>
+<rect x="60" y="110" width="1060" height="150" rx="12" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1.2"/>
+<text x="84" y="138" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="14" font-weight="600" fill="#1E3A8A" text-anchor="start">客户端层 · Cocos Creator 3.8.8 / TypeScript</text>
+<rect x="84" y="156" width="236" height="82" rx="8" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1.2"/>
+<text x="202.0" y="194.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#1E3A8A" text-anchor="middle">TableUI</text>
+<text x="202.0" y="214.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="middle">牌桌渲染 · 交互 · 视角旋转</text>
+<rect x="336" y="156" width="236" height="82" rx="8" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1.2"/>
+<text x="454.0" y="194.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#1E3A8A" text-anchor="middle">CardUI</text>
+<text x="454.0" y="214.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="middle">牌面矢量绘制</text>
+<rect x="588" y="156" width="236" height="82" rx="8" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1.2"/>
+<text x="706.0" y="194.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#1E3A8A" text-anchor="middle">NetClient</text>
+<text x="706.0" y="214.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="middle">WS 封装 · 心跳 · 重连</text>
+<rect x="840" y="156" width="236" height="82" rx="8" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1.2"/>
+<text x="958.0" y="194.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#1E3A8A" text-anchor="middle">ServerUrl</text>
+<text x="958.0" y="214.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="middle">地址解析 · 兜底注入</text>
+<rect x="60" y="280" width="1060" height="150" rx="12" fill="#EEF2F6" stroke="#64748B" stroke-width="1.2"/>
+<text x="84" y="308" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="14" font-weight="600" fill="#334155" text-anchor="start">服务端接入层 · Netty 4 WebSocket</text>
+<rect x="84" y="326" width="236" height="82" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1.2"/>
+<text x="202.0" y="364.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#334155" text-anchor="middle">GameServer</text>
+<text x="202.0" y="384.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="middle">pipeline /ws · 空闲 90s</text>
+<rect x="336" y="326" width="236" height="82" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1.2"/>
+<text x="454.0" y="364.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#334155" text-anchor="middle">WsServerHandler</text>
+<text x="454.0" y="384.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="middle">join / cmd / snapshot / ping</text>
+<rect x="588" y="326" width="236" height="82" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1.2"/>
+<text x="706.0" y="364.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#334155" text-anchor="middle">SessionRegistry</text>
+<text x="706.0" y="384.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="middle">token → 玩家身份绑定</text>
+<rect x="840" y="326" width="236" height="82" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1.2"/>
+<text x="958.0" y="364.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#334155" text-anchor="middle">ChannelSink</text>
+<text x="958.0" y="384.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="middle">按连接回推消息</text>
+<rect x="60" y="450" width="1060" height="150" rx="12" fill="#F3E8FD" stroke="#6D28D9" stroke-width="1.2"/>
+<text x="84" y="478" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="14" font-weight="600" fill="#4C1D95" text-anchor="start">应用层 · game-room</text>
+<rect x="84" y="496" width="236" height="82" rx="8" fill="#F3E8FD" stroke="#6D28D9" stroke-width="1.2"/>
+<text x="202.0" y="534.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#4C1D95" text-anchor="middle">RoomManager</text>
+<text x="202.0" y="554.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="middle">建房 · 入座 · 路由 · 恢复</text>
+<rect x="336" y="496" width="236" height="82" rx="8" fill="#F3E8FD" stroke="#6D28D9" stroke-width="1.2"/>
+<text x="454.0" y="534.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#4C1D95" text-anchor="middle">RoomActor</text>
+<text x="454.0" y="554.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="middle">单房线程模型 · 驱动</text>
+<rect x="588" y="496" width="236" height="82" rx="8" fill="#F3E8FD" stroke="#6D28D9" stroke-width="1.2"/>
+<text x="706.0" y="534.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#4C1D95" text-anchor="middle">BotBrain / BotPlayer</text>
+<text x="706.0" y="554.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="middle">陪打策略 · 拟人化</text>
+<rect x="840" y="496" width="236" height="82" rx="8" fill="#F3E8FD" stroke="#6D28D9" stroke-width="1.2"/>
+<text x="958.0" y="534.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#4C1D95" text-anchor="middle">RoomStateStore</text>
+<text x="958.0" y="554.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="middle">Redis / 内存命令日志</text>
+<rect x="60" y="620" width="1060" height="150" rx="12" fill="#E7F6EF" stroke="#047857" stroke-width="1.2"/>
+<text x="84" y="648" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="14" font-weight="600" fill="#065F46" text-anchor="start">领域层 · game-domain（纯 Java，无框架依赖）</text>
+<rect x="84" y="666" width="236" height="82" rx="8" fill="#E7F6EF" stroke="#047857" stroke-width="1.2"/>
+<text x="202.0" y="704.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#065F46" text-anchor="middle">GameRoom</text>
+<text x="202.0" y="724.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="middle">牌局聚合根 · 状态机</text>
+<rect x="336" y="666" width="236" height="82" rx="8" fill="#E7F6EF" stroke="#047857" stroke-width="1.2"/>
+<text x="454.0" y="704.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#065F46" text-anchor="middle">GameCommand ×10</text>
+<text x="454.0" y="724.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="middle">命令模式 · 可回放</text>
+<rect x="588" y="666" width="236" height="82" rx="8" fill="#E7F6EF" stroke="#047857" stroke-width="1.2"/>
+<text x="706.0" y="704.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#065F46" text-anchor="middle">FollowValidator / Trick</text>
+<text x="706.0" y="724.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="middle">牌型与跟牌判定</text>
+<rect x="840" y="666" width="236" height="82" rx="8" fill="#E7F6EF" stroke="#047857" stroke-width="1.2"/>
+<text x="958.0" y="704.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#065F46" text-anchor="middle">ScoreCalculator</text>
+<text x="958.0" y="724.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="middle">计分 · 血数 · 升级</text>
+<rect x="60" y="790" width="1060" height="96" rx="12" fill="#F8FAFC" stroke="#94A3B8" stroke-width="1.2"/>
+<text x="84" y="818" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="14" font-weight="600" fill="#4B5563" text-anchor="start">运行环境 / 存储层</text>
+<rect x="84" y="832" width="300" height="42" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1.2"/>
+<text x="234.0" y="858.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="600" fill="#334155" text-anchor="middle">Redis（可选）· 命令日志，重启可重放恢复</text>
+<rect x="404" y="832" width="300" height="42" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1.2"/>
+<text x="554.0" y="858.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="600" fill="#334155" text-anchor="middle">内存（降级）· Redis 不可用时自动切换</text>
+<rect x="724" y="832" width="372" height="42" rx="8" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1.2"/>
+<text x="910.0" y="858.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="600" fill="#1E3A8A" text-anchor="middle">微信小游戏运行环境（无 DOM / 无 location）</text>
+<line x1="100" y1="260" x2="100" y2="280" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<text x="118" y="275" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="400" fill="#4B5563" text-anchor="start">WebSocket 长连接（局域网 ws:// · 真机需 wss://）+ JSON 消息</text>
+<line x1="100" y1="430" x2="100" y2="450" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<text x="118" y="445" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="400" fill="#4B5563" text-anchor="start">Java 方法调用（进程内，同步）</text>
+<line x1="100" y1="600" x2="100" y2="620" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<text x="118" y="615" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="400" fill="#4B5563" text-anchor="start">Java 方法调用（进程内，同步）</text>
+<rect x="60" y="902" width="1060" height="98.5" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1"/>
+<text x="72" y="924.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="start">关键约束（决定了部署方案）</text>
+<text x="72" y="940.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="start">① 微信小游戏真机只允许 wss://，ws:// 仅在「开发调试 → 打开调试」模式下可用；socket 合法域名必须是 wss + ICP 备案域名，192.168.x.x / localhost 一律非法。</text>
+<text x="72" y="957.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="start">② 战斗服地址烧进小游戏包（连不上服务器时无法取配置）→ 地址必须固定，因此免费内网穿透不适用。</text>
+<text x="72" y="973.5" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="start">③ 客户端无 location / 无 DOM → 服务端地址靠构建期注入 + 运行时兜底解析（ServerUrl.resolveServerUrl）。</text>
+<text x="72" y="990.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="start">④ 领域层不依赖任何框架与网络 → 规则正确性可用纯 JUnit 验证（25 个测试类）。</text>
+</svg>

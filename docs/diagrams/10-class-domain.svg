@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 940" width="1240" height="940">
+<title>图 10  类图 —— 核心领域模型（game-domain）</title>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="#94A3B8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="#1D4ED8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#4B5563"/></marker></defs>
+<rect width="1240" height="940" fill="#FFFFFF"/>
+<text x="48" y="46" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="21" font-weight="600" fill="#1F2937">图 10  类图 —— 核心领域模型（game-domain）</text>
+<text x="48" y="70" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" fill="#6B7280">聚合根、实体、值对象与领域服务；成员名取自真实源码，关系为 UML 标准记法</text>
+<rect x="40" y="130" width="280" height="150" rx="10" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1.2"/>
+<line x1="40" y1="178" x2="320" y2="178" stroke="#1D4ED8" stroke-width="1"/>
+<text x="180.0" y="150" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="middle">«聚合根»</text>
+<text x="180.0" y="168" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#1E3A8A" text-anchor="middle">GameRoom</text>
+<text x="54" y="200" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- phase: GamePhase</text>
+<text x="54" y="215" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- players: Map&lt;Seat, Player&gt;</text>
+<text x="54" y="230" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- hands / bottomCards</text>
+<text x="54" y="245" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- trump / bankerSeat / turnSeat</text>
+<text x="54" y="260" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- currentTrick: Trick</text>
+<text x="54" y="275" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">+ apply(GameCommand) / transitionTo()</text>
+<rect x="340" y="130" width="280" height="150" rx="10" fill="#F3E8FD" stroke="#6D28D9" stroke-width="1.2"/>
+<line x1="340" y1="178" x2="620" y2="178" stroke="#6D28D9" stroke-width="1"/>
+<text x="480.0" y="150" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="middle">«值对象»</text>
+<text x="480.0" y="168" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#4C1D95" text-anchor="middle">Card</text>
+<text x="354" y="200" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- suit: Suit</text>
+<text x="354" y="215" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- rank: int（3–10 / J–A / 王）</text>
+<text x="354" y="230" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- equals 按值比较（三副牌多重集）</text>
+<text x="354" y="245" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">+ Cards.containsCopies / removeCopies</text>
+<text x="354" y="260" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">  严禁手牌用 removeAll / containsAll</text>
+<rect x="640" y="130" width="280" height="150" rx="10" fill="#E7F6EF" stroke="#047857" stroke-width="1.2"/>
+<line x1="640" y1="178" x2="920" y2="178" stroke="#047857" stroke-width="1"/>
+<text x="780.0" y="150" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="middle">«实体»</text>
+<text x="780.0" y="168" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#065F46" text-anchor="middle">Trick</text>
+<text x="654" y="200" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- leader: Seat</text>
+<text x="654" y="215" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- lead: Combo</text>
+<text x="654" y="230" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- plays: List&lt;PlayRecord&gt;</text>
+<text x="654" y="245" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">+ 一轮结束判定（最后出牌者胜）</text>
+<rect x="940" y="130" width="280" height="150" rx="10" fill="#FDF0E3" stroke="#B45309" stroke-width="1.2"/>
+<line x1="940" y1="178" x2="1220" y2="178" stroke="#B45309" stroke-width="1"/>
+<text x="1080.0" y="150" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="middle">«值对象»</text>
+<text x="1080.0" y="168" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#7C2D12" text-anchor="middle">TrumpContext</text>
+<text x="954" y="200" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- level: int（级数 3–10）</text>
+<text x="954" y="215" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- trumpSuit: Suit</text>
+<text x="954" y="230" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">+ 定主后手牌排序依据</text>
+<text x="954" y="245" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">  （CardComparator(trump)）</text>
+<rect x="40" y="310" width="280" height="150" rx="10" fill="#EEF2F6" stroke="#64748B" stroke-width="1.2"/>
+<line x1="40" y1="358" x2="320" y2="358" stroke="#64748B" stroke-width="1"/>
+<text x="180.0" y="330" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="middle">«抽象类»</text>
+<text x="180.0" y="348" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#334155" text-anchor="middle">Player</text>
+<text x="54" y="380" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- playerId / seat</text>
+<text x="54" y="395" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- hand: List&lt;Card&gt;</text>
+<text x="54" y="410" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">HumanPlayer（真人）</text>
+<text x="54" y="425" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">BotPlayer（game-room 侧）</text>
+<rect x="340" y="310" width="280" height="150" rx="10" fill="#F3E8FD" stroke="#6D28D9" stroke-width="1.2"/>
+<line x1="340" y1="358" x2="620" y2="358" stroke="#6D28D9" stroke-width="1"/>
+<text x="480.0" y="330" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="middle">«枚举 + 值对象»</text>
+<text x="480.0" y="348" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#4C1D95" text-anchor="middle">Combo / ComboType</text>
+<text x="354" y="380" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">SINGLE(1) 单牌</text>
+<text x="354" y="395" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">PAIR(2) 棒子（对子）</text>
+<text x="354" y="410" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">TRIPLE(3) 滚子（三张）</text>
+<text x="354" y="425" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">无顺子 / 拖拉机 / 甩牌</text>
+<rect x="640" y="310" width="280" height="150" rx="10" fill="#E7F6EF" stroke="#047857" stroke-width="1.2"/>
+<line x1="640" y1="358" x2="920" y2="358" stroke="#047857" stroke-width="1"/>
+<text x="780.0" y="330" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="middle">«领域服务»</text>
+<text x="780.0" y="348" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#065F46" text-anchor="middle">FollowValidator</text>
+<text x="654" y="380" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">+ validate(room, seat, cards)</text>
+<text x="654" y="395" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">  1) 首家花色必须跟出</text>
+<text x="654" y="410" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">  2) 牌型与张数匹配</text>
+<text x="654" y="425" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">  3) FollowRule: STRICT / ALIVE</text>
+<rect x="940" y="310" width="280" height="150" rx="10" fill="#FDF0E3" stroke="#B45309" stroke-width="1.2"/>
+<line x1="940" y1="358" x2="1220" y2="358" stroke="#B45309" stroke-width="1"/>
+<text x="1080.0" y="330" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="middle">«领域服务»</text>
+<text x="1080.0" y="348" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#7C2D12" text-anchor="middle">CardComparator</text>
+<text x="954" y="380" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">+ compare(Card, Card)</text>
+<text x="954" y="395" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">  小王 &lt; 大王 &lt; 级牌 / 主牌</text>
+<text x="954" y="410" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">定主前后排序规则不同</text>
+<rect x="40" y="490" width="280" height="150" rx="10" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1.2"/>
+<line x1="40" y1="538" x2="320" y2="538" stroke="#1D4ED8" stroke-width="1"/>
+<text x="180.0" y="510" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="middle">«接口»</text>
+<text x="180.0" y="528" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#1E3A8A" text-anchor="middle">GameCommand</text>
+<text x="54" y="560" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">+ execute(GameRoom): CommandResult</text>
+<text x="54" y="575" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">+ rollback(GameRoom)</text>
+<text x="54" y="590" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">AbstractGameCommand 提供模板</text>
+<rect x="340" y="490" width="280" height="150" rx="10" fill="#F3E8FD" stroke="#6D28D9" stroke-width="1.2"/>
+<line x1="340" y1="538" x2="620" y2="538" stroke="#6D28D9" stroke-width="1"/>
+<text x="480.0" y="510" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="middle">«命令模式»</text>
+<text x="480.0" y="528" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#4C1D95" text-anchor="middle">命令实现 ×10</text>
+<text x="354" y="560" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">REVEAL / CONFIRM / RESOLVE_BOTTOM</text>
+<text x="354" y="575" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">TRIBUTE / RETURN_TRIBUTE / BURY</text>
+<text x="354" y="590" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">PLAY / SETTLE / DEAL / NEWGAME</text>
+<text x="354" y="605" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">→ 可序列化 JSON、可回放</text>
+<rect x="640" y="490" width="280" height="150" rx="10" fill="#FDF0E3" stroke="#B45309" stroke-width="1.2"/>
+<line x1="640" y1="538" x2="920" y2="538" stroke="#B45309" stroke-width="1"/>
+<text x="780.0" y="510" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="middle">«值对象»</text>
+<text x="780.0" y="528" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#7C2D12" text-anchor="middle">RoundSettlement</text>
+<text x="654" y="560" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- attackerScore / bankerScore</text>
+<text x="654" y="575" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- attackerTakesBank</text>
+<text x="654" y="590" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- attackerPromoted / bankerPromoted</text>
+<text x="654" y="605" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- dugBottom（抠底 ×2）</text>
+<rect x="940" y="490" width="280" height="150" rx="10" fill="#FDF0E3" stroke="#B45309" stroke-width="1.2"/>
+<line x1="940" y1="538" x2="1220" y2="538" stroke="#B45309" stroke-width="1"/>
+<text x="1080.0" y="510" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="middle">«领域服务»</text>
+<text x="1080.0" y="528" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#7C2D12" text-anchor="middle">ScoreCalculator</text>
+<text x="954" y="560" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">+ 分牌计分（5 / 10 / 10）</text>
+<text x="954" y="575" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">+ 血数 = 分差折算 + 扣王折算</text>
+<text x="954" y="590" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">  两笔分别结算</text>
+<text x="954" y="605" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">+ 升级 / 上台 / 出锅判定</text>
+<rect x="40" y="670" width="280" height="150" rx="10" fill="#E7F6EF" stroke="#047857" stroke-width="1.2"/>
+<line x1="40" y1="718" x2="320" y2="718" stroke="#047857" stroke-width="1"/>
+<text x="180.0" y="690" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="middle">«领域服务»</text>
+<text x="180.0" y="708" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#065F46" text-anchor="middle">TributeCalculator</text>
+<text x="54" y="740" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">+ 进贡关系计算</text>
+<text x="54" y="755" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">+ 血数 → 进贡张数</text>
+<text x="54" y="770" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">仅庄家上家进贡</text>
+<rect x="340" y="670" width="280" height="150" rx="10" fill="#E7F6EF" stroke="#047857" stroke-width="1.2"/>
+<line x1="340" y1="718" x2="620" y2="718" stroke="#047857" stroke-width="1"/>
+<text x="480.0" y="690" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="middle">«值对象»</text>
+<text x="480.0" y="708" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#065F46" text-anchor="middle">TributeObligation</text>
+<text x="354" y="740" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- payer: Seat</text>
+<text x="354" y="755" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- receiver: Seat</text>
+<text x="354" y="770" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- bloodCount: int</text>
+<rect x="640" y="670" width="280" height="150" rx="10" fill="#EEF2F6" stroke="#64748B" stroke-width="1.2"/>
+<line x1="640" y1="718" x2="920" y2="718" stroke="#64748B" stroke-width="1"/>
+<text x="780.0" y="690" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="middle">«枚举»</text>
+<text x="780.0" y="708" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#334155" text-anchor="middle">Seat / Team</text>
+<text x="654" y="740" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">Seat: NORTH / EAST / SOUTH / WEST</text>
+<text x="654" y="755" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">Team: 对家两两配对（1–3、2–4）</text>
+<rect x="940" y="670" width="280" height="150" rx="10" fill="#EEF2F6" stroke="#64748B" stroke-width="1.2"/>
+<line x1="940" y1="718" x2="1220" y2="718" stroke="#64748B" stroke-width="1"/>
+<text x="1080.0" y="690" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="middle">«支撑类»</text>
+<text x="1080.0" y="708" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#334155" text-anchor="middle">CommandHistory / Result</text>
+<text x="954" y="740" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- CommandHistory: 命令日志</text>
+<text x="954" y="755" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">- CommandResult: 成功 / 失败 + 原因</text>
+<text x="954" y="770" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#4B5563" text-anchor="start">→ 供重启重放与可追溯性</text>
+<path d="M180 130 L180 112 L780 112 L780 130" fill="none" stroke="#047857" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#a)"/>
+<text x="300" y="106" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="600" fill="#047857" text-anchor="start">◆— GameRoom 1 : 0..1 currentTrick</text>
+<path d="M240 130 L240 96 L1080 96 L1080 130" fill="none" stroke="#B45309" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#a)"/>
+<text x="620" y="90" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="600" fill="#B45309" text-anchor="start">◆— GameRoom 1 : 0..1 trump</text>
+<path d="M100 280 L100 310" fill="none" stroke="#64748B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#a)"/>
+<text x="108" y="302" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="600" fill="#64748B" text-anchor="start">◆— GameRoom 1 : 4 players</text>
+<rect x="40" y="845" width="560" height="64" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1"/>
+<text x="52" y="867" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">记法：◆— 组合（聚合根内部持有）；⇢ 依赖 / 使用。</text>
+<text x="52" y="883" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">其余依赖关系：Trick ⇢ Combo；FollowValidator ⇢ Combo / FollowRule；GameCommand ⇢ GameRoom</text>
+<text x="52" y="899" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">；ScoreCalculator ⇢ RoundSettlement.Result；TributeCalculator ⇢ TributeObligation。</text>
+<rect x="640" y="845" width="560" height="64" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1"/>
+<text x="652" y="867" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">设计要点：领域层不含任何框架与网络依赖，规则正确性由 25 个 JUnit 测试类保证（含</text>
+<text x="652" y="883" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">FullGameFlowTest 整局回归、FollowValidatorTest、ScoreCalculatorTest、</text>
+<text x="652" y="899" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">TributeCalculatorTest）。</text>
+</svg>

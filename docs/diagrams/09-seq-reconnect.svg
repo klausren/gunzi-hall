@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 840" width="1180" height="840">
+<title>图 9  顺序图 —— 断线重连与牌局恢复</title>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="#94A3B8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="#1D4ED8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#4B5563"/></marker></defs>
+<rect width="1180" height="840" fill="#FFFFFF"/>
+<text x="48" y="46" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="21" font-weight="600" fill="#1F2937">图 9  顺序图 —— 断线重连与牌局恢复</text>
+<text x="48" y="70" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" fill="#6B7280">两条路径：①连接断开后自动重连（内存中房间）②服务重启后从命令日志重放重建</text>
+<rect x="100.0" y="104" width="180" height="54" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1.2"/>
+<text x="190.0" y="136.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="600" fill="#334155" text-anchor="middle">玩家客户端</text>
+<line x1="190.0" y1="158" x2="190.0" y2="1140" stroke="#94A3B8" stroke-width="1" stroke-dasharray="5 5"/>
+<rect x="320.0" y="104" width="180" height="54" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1.2"/>
+<text x="410.0" y="136.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="600" fill="#334155" text-anchor="middle">WsServerHandler</text>
+<line x1="410.0" y1="158" x2="410.0" y2="1140" stroke="#94A3B8" stroke-width="1" stroke-dasharray="5 5"/>
+<rect x="540.0" y="104" width="180" height="54" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1.2"/>
+<text x="630.0" y="136.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="600" fill="#334155" text-anchor="middle">RoomManager</text>
+<line x1="630.0" y1="158" x2="630.0" y2="1140" stroke="#94A3B8" stroke-width="1" stroke-dasharray="5 5"/>
+<rect x="760.0" y="104" width="180" height="54" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1.2"/>
+<text x="850.0" y="136.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="600" fill="#334155" text-anchor="middle">RoomActor</text>
+<line x1="850.0" y1="158" x2="850.0" y2="1140" stroke="#94A3B8" stroke-width="1" stroke-dasharray="5 5"/>
+<rect x="980.0" y="104" width="180" height="54" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1.2"/>
+<text x="1070.0" y="136.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="600" fill="#334155" text-anchor="middle">RoomStateStore</text>
+<line x1="1070.0" y1="158" x2="1070.0" y2="1140" stroke="#94A3B8" stroke-width="1" stroke-dasharray="5 5"/>
+<rect x="184.0" y="190" width="12" height="510" rx="3" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1"/>
+<rect x="404.0" y="250" width="12" height="350" rx="3" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1"/>
+<rect x="624.0" y="300" width="12" height="360" rx="3" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1"/>
+<rect x="844.0" y="340" width="12" height="380" rx="3" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1"/>
+<rect x="1064.0" y="460" width="12" height="100" rx="3" fill="#F3E8FD" stroke="#6D28D9" stroke-width="1"/>
+<text x="60" y="178" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#1D4ED8" text-anchor="start">① 掉线重连（房间仍在内存中）</text>
+<path d="M190.0 200 L218.0 200 L218.0 220 L190.0 220" fill="none" stroke="#4B5563" stroke-width="1.3" marker-end="url(#a)"/>
+<text x="226.0" y="216" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">心跳未收到 pong → onclose → scheduleReconnect（指数退避）</text>
+<line x1="190.0" y1="250" x2="410.0" y2="250" stroke="#4B5563" stroke-width="1.4" marker-end="url(#a)"/>
+<text x="300.0" y="243" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#4B5563" text-anchor="middle">{op:"join"}  // 同 roomId / playerId / seat</text>
+<line x1="410.0" y1="290" x2="630.0" y2="290" stroke="#4B5563" stroke-width="1.4" marker-end="url(#a)"/>
+<text x="520.0" y="283" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#4B5563" text-anchor="middle">join(...)</text>
+<line x1="630.0" y1="330" x2="850.0" y2="330" stroke="#4B5563" stroke-width="1.4" marker-end="url(#a)"/>
+<text x="740.0" y="323" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#4B5563" text-anchor="middle">hasPlayer(playerId) → 命中：判定为重连</text>
+<path d="M850.0 370 L878.0 370 L878.0 390 L850.0 390" fill="none" stroke="#4B5563" stroke-width="1.3" marker-end="url(#a)"/>
+<text x="886.0" y="386" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">addSink(sink)  // 绑定新连接</text>
+<line x1="850.0" y1="420" x2="190.0" y2="420" stroke="#047857" stroke-width="1.4" marker-end="url(#a)"/>
+<text x="520.0" y="413" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#047857" text-anchor="middle">snapshotFor(playerId)：先发确定性快照</text>
+<path d="M850.0 464 L878.0 464 L878.0 484 L850.0 484" fill="none" stroke="#4B5563" stroke-width="1.3" marker-end="url(#a)"/>
+<text x="886.0" y="480" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">resumeAfterRestore()  // 再恢复 bot 驱动</text>
+<line x1="190.0" y1="514" x2="410.0" y2="514" stroke="#1D4ED8" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#a)"/>
+<text x="300.0" y="507" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#1D4ED8" text-anchor="middle">requestSnapshot()  // 客户端主动对齐 UI</text>
+<text x="60" y="566" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#6D28D9" text-anchor="start">② 服务重启后恢复（内存房间已丢）</text>
+<line x1="630.0" y1="588" x2="1070.0" y2="588" stroke="#4B5563" stroke-width="1.4" marker-end="url(#a)"/>
+<text x="850.0" y="581" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#4B5563" text-anchor="middle">commandLog(roomId)</text>
+<line x1="1070.0" y1="624" x2="630.0" y2="624" stroke="#6D28D9" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#a)"/>
+<text x="850.0" y="617" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#6D28D9" text-anchor="middle">命令日志（JOIN / REVEAL / PLAY / … 逐条）</text>
+<path d="M630.0 664 L658.0 664 L658.0 684 L630.0 684" fill="none" stroke="#4B5563" stroke-width="1.3" marker-end="url(#a)"/>
+<text x="666.0" y="680" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">replayJoin / replaySpec 逐条重放（不广播、不写日志）</text>
+<rect x="60" y="740" width="1060" height="48" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1"/>
+<text x="72" y="762" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">顺序铁律：重连时必须「先发快照、后恢复驱动」——若顺序颠倒，异步驱动线程可能已推进牌局，重连者拿到的就是过期快照。</text>
+<text x="72" y="778" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">注意：replaySpec 期间 RoomActor 处于 replaying 状态，不广播 event、不重复写命令日志；重放结束也不调用 resumeAfterRestore()，由 join() 在发完快照后统一恢复。</text>
+</svg>

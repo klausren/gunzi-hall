@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 1040" width="1180" height="1040">
+<title>图 6  活动图 —— 出牌循环与结算</title>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="#94A3B8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="#1D4ED8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#4B5563"/></marker></defs>
+<rect width="1180" height="1040" fill="#FFFFFF"/>
+<text x="48" y="46" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="21" font-weight="600" fill="#1F2937">图 6  活动图 —— 出牌循环与结算</text>
+<text x="48" y="70" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" fill="#6B7280">一局中最主要的循环：出牌 → 跟牌判定 → 本墩结果，直到手牌打完进入结算（来源：RoomActor.stepPlay / onHumanTimeout）</text>
+<circle cx="340" cy="118" r="9" fill="#1F2937"/>
+<line x1="340" y1="127" x2="340" y2="150" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<rect x="110" y="150" width="460" height="56" rx="10" fill="#F3E8FD" stroke="#6D28D9" stroke-width="1.2"/>
+<text x="340.0" y="182.16666666666666" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#4C1D95" text-anchor="middle">[PLAYING] 轮到某家出牌</text>
+<path d="M340 228.0L470.0 272.0L340 316.0L210.0 272.0Z" fill="#FDF0E3" stroke="#B45309" stroke-width="1.2"/>
+<text x="340" y="276.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#7C2D12" text-anchor="middle">轮到真人且连接在线？</text>
+<rect x="110" y="340" width="460" height="56" rx="10" fill="#F3E8FD" stroke="#6D28D9" stroke-width="1.2"/>
+<text x="340.0" y="372.1666666666667" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#4C1D95" text-anchor="middle">玩家点选牌（复合身份 code#occurrence）→ 点「出牌」</text>
+<path d="M340 418.0L470.0 462.0L340 506.0L210.0 462.0Z" fill="#FDF0E3" stroke="#B45309" stroke-width="1.2"/>
+<text x="340" y="459.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#7C2D12" text-anchor="middle">跟牌合法？</text>
+<text x="340" y="473.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#7C2D12" text-anchor="middle">FollowValidator</text>
+<rect x="110" y="530" width="460" height="56" rx="10" fill="#F3E8FD" stroke="#6D28D9" stroke-width="1.2"/>
+<text x="340.0" y="562.1666666666666" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#4C1D95" text-anchor="middle">出牌成功：写命令日志 → 广播 event + 各家私有快照</text>
+<path d="M340 608.0L470.0 652.0L340 696.0L210.0 652.0Z" fill="#FDF0E3" stroke="#B45309" stroke-width="1.2"/>
+<text x="340" y="656.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#7C2D12" text-anchor="middle">手牌已全部打完？</text>
+<rect x="110" y="720" width="460" height="56" rx="10" fill="#FDF0E3" stroke="#B45309" stroke-width="1.2"/>
+<text x="340.0" y="752.1666666666666" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#7C2D12" text-anchor="middle">[SETTLING] 算分（抠底 ×2）/ 血数 / 升级</text>
+<path d="M340 798.0L470.0 842.0L340 886.0L210.0 842.0Z" fill="#FDF0E3" stroke="#B45309" stroke-width="1.2"/>
+<text x="340" y="846.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#7C2D12" text-anchor="middle">级数已到 10（出锅）？</text>
+<line x1="340" y1="206" x2="340" y2="228.0" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<line x1="340" y1="316.0" x2="340" y2="340" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<line x1="340" y1="396" x2="340" y2="418.0" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<line x1="340" y1="506.0" x2="340" y2="530" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<line x1="340" y1="586" x2="340" y2="608.0" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<line x1="340" y1="696.0" x2="340" y2="720" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<line x1="340" y1="776" x2="340" y2="798.0" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<line x1="340" y1="886.0" x2="340" y2="916" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<circle cx="340" cy="928" r="11" fill="none" stroke="#1F2937" stroke-width="1.6"/>
+<circle cx="340" cy="928" r="6" fill="#1F2937"/>
+<line x1="470.0" y1="272.0" x2="680" y2="272.0" stroke="#047857" stroke-width="1.4" marker-end="url(#a)"/>
+<text x="510.0" y="264.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#047857" text-anchor="middle">否</text>
+<rect x="680" y="243.0" width="460" height="58" rx="10" fill="#E7F6EF" stroke="#047857" stroke-width="1.2"/>
+<text x="910.0" y="276.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="600" fill="#065F46" text-anchor="middle">Bot 出牌 / 超时托管代打（默认 32s）</text>
+<text x="690" y="324.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">↩ 回到「轮到某家出牌」，牌局继续推进</text>
+<line x1="470.0" y1="462.0" x2="680" y2="462.0" stroke="#B91C1C" stroke-width="1.4" marker-end="url(#a)"/>
+<text x="510.0" y="454.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#B91C1C" text-anchor="middle">否</text>
+<rect x="680" y="433.0" width="460" height="58" rx="10" fill="#FDECEC" stroke="#B91C1C" stroke-width="1.2"/>
+<text x="910.0" y="466.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="600" fill="#7F1D1D" text-anchor="middle">拒绝出牌 + 返回可读原因</text>
+<text x="690" y="514.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">如「有首家花色必须跟出」；牌局状态不变，可重出</text>
+<line x1="470.0" y1="652.0" x2="680" y2="652.0" stroke="#6D28D9" stroke-width="1.4" marker-end="url(#a)"/>
+<text x="510.0" y="644.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#6D28D9" text-anchor="middle">否</text>
+<rect x="680" y="623.0" width="460" height="58" rx="10" fill="#F3E8FD" stroke="#6D28D9" stroke-width="1.2"/>
+<text x="910.0" y="656.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="600" fill="#4C1D95" text-anchor="middle">未打完 → 进入下一墩</text>
+<text x="690" y="704.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">↩ 回到「轮到某家出牌」</text>
+<line x1="470.0" y1="842.0" x2="680" y2="842.0" stroke="#1D4ED8" stroke-width="1.4" marker-end="url(#a)"/>
+<text x="510.0" y="834.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#1D4ED8" text-anchor="middle">否</text>
+<rect x="680" y="813.0" width="460" height="58" rx="10" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1.2"/>
+<text x="910.0" y="846.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="12" font-weight="600" fill="#1E3A8A" text-anchor="middle">未出锅 → 开新局（带进贡关系）</text>
+<text x="690" y="894.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">↩ 回到图 5 的「发牌」步骤</text>
+<path d="M680 681.0 L640 681.0 L640 990 L70 990 L70 178.0 L110 178.0" fill="none" stroke="#94A3B8" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#a)"/>
+<text x="250" y="983" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="start">回边：一局最多约 40 墩，每墩重复该循环</text>
+</svg>

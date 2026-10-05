@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 900" width="1180" height="900">
+<title>图 4  牌局状态图（GamePhase 状态机）</title>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="#94A3B8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1L9 5L1 9" fill="none" stroke="#1D4ED8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker><marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#4B5563"/></marker></defs>
+<rect width="1180" height="900" fill="#FFFFFF"/>
+<text x="48" y="46" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="21" font-weight="600" fill="#1F2937">图 4  牌局状态图（GamePhase 状态机）</text>
+<text x="48" y="70" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" fill="#6B7280">来源：game-domain/.../room/GamePhase.java —— 枚举名与 canTransitionTo() 的合法迁移逐条对应</text>
+<text x="120" y="150" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="13" font-weight="600" fill="#4B5563" text-anchor="start">主流程（正向单步迁移）</text>
+<rect x="120" y="170" width="300" height="62" rx="10" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1.2"/>
+<text x="270.0" y="198.25" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="15" font-weight="600" fill="#1E3A8A" text-anchor="middle">WAITING</text>
+<text x="270.0" y="218.25" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="middle">等人齐 4 人</text>
+<line x1="270" y1="232" x2="270" y2="256" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<rect x="120" y="256" width="300" height="62" rx="10" fill="#E8F0FE" stroke="#1D4ED8" stroke-width="1.2"/>
+<text x="270.0" y="284.25" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="15" font-weight="600" fill="#1E3A8A" text-anchor="middle">DEALING</text>
+<text x="270.0" y="304.25" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="middle">发牌 39×4 + 底 6</text>
+<line x1="270" y1="318" x2="270" y2="342" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<rect x="120" y="342" width="300" height="62" rx="10" fill="#E7F6EF" stroke="#047857" stroke-width="1.2"/>
+<text x="270.0" y="370.25" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="15" font-weight="600" fill="#065F46" text-anchor="middle">BIDDING</text>
+<text x="270.0" y="390.25" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="middle">亮主 / 反主 / 定主</text>
+<line x1="270" y1="404" x2="270" y2="428" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<rect x="120" y="428" width="300" height="62" rx="10" fill="#E7F6EF" stroke="#047857" stroke-width="1.2"/>
+<text x="270.0" y="456.25" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="15" font-weight="600" fill="#065F46" text-anchor="middle">TRIBUTE</text>
+<text x="270.0" y="476.25" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="middle">进贡 / 还贡 / 抗贡</text>
+<line x1="270" y1="490" x2="270" y2="514" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<rect x="120" y="514" width="300" height="62" rx="10" fill="#E7F6EF" stroke="#047857" stroke-width="1.2"/>
+<text x="270.0" y="542.25" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="15" font-weight="600" fill="#065F46" text-anchor="middle">BURYING</text>
+<text x="270.0" y="562.25" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="middle">庄家扣底 6 张</text>
+<line x1="270" y1="576" x2="270" y2="600" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<rect x="120" y="600" width="300" height="62" rx="10" fill="#F3E8FD" stroke="#6D28D9" stroke-width="1.2"/>
+<text x="270.0" y="628.25" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="15" font-weight="600" fill="#4C1D95" text-anchor="middle">PLAYING</text>
+<text x="270.0" y="648.25" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="middle">出牌直至手牌打完</text>
+<line x1="270" y1="662" x2="270" y2="686" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<rect x="120" y="686" width="300" height="62" rx="10" fill="#FDF0E3" stroke="#B45309" stroke-width="1.2"/>
+<text x="270.0" y="714.25" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="15" font-weight="600" fill="#7C2D12" text-anchor="middle">SETTLING</text>
+<text x="270.0" y="734.25" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="middle">算分 / 血数 / 升级</text>
+<line x1="270" y1="748" x2="270" y2="772" stroke="#94A3B8" stroke-width="1.4" marker-end="url(#a)"/>
+<rect x="120" y="772" width="300" height="62" rx="10" fill="#FDF0E3" stroke="#B45309" stroke-width="1.2"/>
+<text x="270.0" y="800.25" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="15" font-weight="600" fill="#7C2D12" text-anchor="middle">ROUND_OVER</text>
+<text x="270.0" y="820.25" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#4B5563" text-anchor="middle">打完 10 出锅</text>
+<path d="M420 373.0 L520 373.0 L520 545.0 L420 545.0" fill="none" stroke="#B45309" stroke-width="1.6" marker-end="url(#a)"/>
+<text x="534" y="521.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#B45309" text-anchor="start">首局或上局无血：</text>
+<text x="534" y="538.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#B45309" text-anchor="start">确认定主后直接进扣底</text>
+<text x="534" y="555.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="start">（BIDDING → BURYING）</text>
+<path d="M420 717.0 L680 717.0 L680 287.0 L420 287.0" fill="none" stroke="#047857" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#a)"/>
+<text x="694" y="317.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#047857" text-anchor="start">多局循环：结算后 / 打完 10 出锅后直接发新局</text>
+<text x="694" y="334.0" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#6B7280" text-anchor="start">（SETTLING → DEALING、ROUND_OVER → DEALING）</text>
+<rect x="880" y="170" width="260" height="128" rx="8" fill="#EEF2F6" stroke="#64748B" stroke-width="1"/>
+<text x="892" y="192" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">NEWGAME（客户端「新局」按钮）</text>
+<text x="892" y="208" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">任意阶段 → WAITING</text>
+<text x="892" y="224" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">RoomActor 收到 NEWGAME 后调用</text>
+<text x="892" y="240" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">room.hardResetToWaiting()，再判断房间是</text>
+<text x="892" y="256" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">否满 4 人：满则重新发牌，不满则广播原因。</text>
+<text x="892" y="272" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">⚠ 当前无权限校验：任何玩家都能重置牌局（见</text>
+<text x="892" y="288" font-family="PingFang SC, Hiragino Sans GB, Microsoft YaHei, Helvetica Neue, Arial, sans-serif" font-size="11" font-weight="400" fill="#4B5563" text-anchor="start">proposal 附录二 B4）。</text>
+</svg>
