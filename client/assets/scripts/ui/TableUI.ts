@@ -200,8 +200,25 @@ export class TableUI extends Component {
     private static readonly TILE_BORDER = new Color(120, 110, 88, 135);
     private static readonly TILE_GOLD = new Color(206, 130, 22, 255);
     private static readonly TILE_H = 24;
-    /** 顶栏"主牌+级数"瓦片宽（花色 + 最多 2 位级数） */
-    private static readonly TRUMP_TILE_W = 50;
+    /** 顶栏"主牌+级数+张数"瓦片宽（花色 19 + 级数位+ "N张"区，见 setTopTrumpBadge） */
+    private static readonly TRUMP_TILE_W = 78;
+
+    // ---- F-11 选中牌放大（proposal Q4） ----
+    /**
+     * 选中牌的放大倍数。
+     *
+     * <p>为什么用 {@code setScale} 而不是改 {@code UITransform.contentSize}：手牌命中区
+     * 已经被压到 {@code spacing} 宽（约 44，见 layoutHandRow），改 size 必须"子节点连着一起改"
+     * 才不会错位（MEMORY 铁律）；而 scale 是节点级变换，**命中区随节点自动一起放大**，
+     * 不需要同步任何子节点，也不怕点数/花色 Label 走形。
+     *
+     * <p>为什么是 1.18：牌面原生 56×80。两行手牌行距 68，1.18 倍后牌高 ≈94，
+     * 放大约 14 单位 > 行距，会与相邻行轻微交叠——但放大的都是**选中**牌（同一行内至多几张），
+     * 且牌面信息集中在顶部，交叠区是空白牌底，可接受。真机若觉得挤，把这里调小即可。
+     */
+    private static readonly SEL_SCALE = 1.18;
+    /** 选中牌的上移量（配合放大，让抬起感更明显） */
+    private static readonly SEL_LIFT = 14;
 
     // 墩牌差量动画状态：座位 → 当前已展示的牌串 / 牌节点
     private trickShown = new Map<SeatName, string>();
@@ -1340,11 +1357,18 @@ export class TableUI extends Component {
     }
 
     /**
-     * 主牌级数图标（"第N局"后面那个小瓦片）：花色矢量 + 级数数字。
+     * 主牌级数图标（"第N局"后面那个小瓦片）：花色矢量 + 级数数字+ **"N张"计数**。
      * 等价于原来的「主方块3」，但一眼可读；未定主时整块隐藏（发牌/亮主阶段还没有主牌）。
+     *
+     * <p>【F-12】右侧的"N张"是**自己手牌里的主牌张数**（proposal Q4）。用手牌而不是全场：
+     *快照只给本人手牌（服务端 snapshotFor(playerId) 的安全设计），这是客户端能拿到的
+     *唯一牌数来源 —— 对"我手上还有几张主牌可用"这个决策来说，也正是玩家真正要问的问题。
+     *判定复用 {@link isTrumpCard}，与服务端 CardTier.isTrump 对齐，不会与服务端算歪。
      */
     private setTopTrumpBadge(t: { suit: string; level: number } | null): void {
-        const sig = t ? `${t.suit}|${t.level}` : '-';
+        // 计数进签名：张数变了要重建瓦片（否则只挪位置、字数不更新）
+        const cnt = t ? this.countTrumpInHand() : 0;
+        const sig = t ? `${t.suit}|${t.level}|${cnt}` : '-';
         if (sig === this.trumpBadgeSig) return;
         this.trumpBadgeSig = sig;
         if (this.trumpBadgeNode) {
@@ -1361,11 +1385,30 @@ export class TableUI extends Component {
             // 花色 + 级数同色（像真实牌面「梅花4」那样一眼读出主牌与级数）
             if (sym) addSuitIcon(tile, sym, -12, 0, 19, color);
             addTileText(tile, String(t.level), 12, 0, 19, color, 26);
+            // 【F-12】"N张"：细一点、小一点，灰棕色，不与主牌信息抢视觉层级。
+            // 手牌为空（还没发完/已被扣完）时不显示 0，避免"主牌0张"这种看不懂的中间态。
+            if (cnt > 0) {
+                addTileText(tile, `${cnt}张`, 30, 0, 13,
+                    new Color(120, 110, 88, 255), 34);
+            }
             box.addChild(tile);
         }
         this.topBarNode.addChild(box);
         this.trumpBadgeNode = box;
         this.layoutTopBar();
+    }
+
+    /**
+     * 【F-12】自己手牌里的主牌张数。
+     *
+     * <p>走 {@link isTrumpCard}（王/级牌/2/主花色），与服务端判定同源；定主前（trump 空）
+     * 返回 0 —— 那时还没有"主"，显示 0 张反而误导。
+     */
+    private countTrumpInHand(): number {
+        const hand = this.snap?.yourHand ?? [];
+        let n = 0;
+        for (const code of hand) if (this.isTrumpCard(code)) n++;
+        return n;
     }
 
     /**
@@ -2345,7 +2388,11 @@ export class TableUI extends Component {
             const key = this.cardKey(hand, idx);
             const selected = this.selected.indexOf(key) >= 0;
             this.handBaseY.set(key, baseY);
-            card.setPosition(x, baseY + (selected ? 12 : 0), 0);
+            // 【F-11】选中态：真放大（setScale，命中区随之放大，无需改子节点尺寸）+ 上移。
+            // 快照重排后重建设手时，已选中的牌也按放大态还原，不会退回"只上移"。
+            const selScale = selected ? TableUI.SEL_SCALE : 1;
+            card.setPosition(x, baseY + (selected ? TableUI.SEL_LIFT : 0), 0);
+            card.setScale(selScale, selScale, 1);
             if (selected) drawCardBg(card, true);
             // 命中区缩到 spacing 宽，子节点必须一起缩（见 MEMORY 铁律）
             const hitW = Math.min(spacing, cardW);
@@ -2354,15 +2401,21 @@ export class TableUI extends Component {
                 const cut = child.getComponent(UITransform);
                 if (cut) cut.setContentSize(hitW, cut.contentSize.height);
             }
+            // 按压反馈相对"当前是否选中"计算：选中牌按下去是 SEL_SCALE*0.94，
+            // 未选中牌仍是 0.94。TOUCH_START（不是 END）：真机微滑会变 TOUCH_CANCEL。
+            const pressScale = (base: number) => (this.selected.indexOf(key) >= 0 ? base * TableUI.SEL_SCALE : base);
             card.on(Node.EventType.TOUCH_START, () => {
-                tween(card).to(0.08, { scale: new Vec3(0.94, 0.94, 1) }, { easing: 'quadOut' }).start();
+                tween(card).to(0.08, { scale: new Vec3(pressScale(0.94), pressScale(0.94), 1) },
+                    { easing: 'quadOut' }).start();
                 this.toggleSelect(key, card);
             });
             card.on(Node.EventType.TOUCH_END, () => {
-                tween(card).to(0.12, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
+                tween(card).to(0.12, { scale: new Vec3(pressScale(1), pressScale(1), 1) },
+                    { easing: 'backOut' }).start();
             });
             card.on(Node.EventType.TOUCH_CANCEL, () => {
-                tween(card).to(0.12, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
+                tween(card).to(0.12, { scale: new Vec3(pressScale(1), pressScale(1), 1) },
+                    { easing: 'backOut' }).start();
             });
             this.handNode.addChild(card);
             this.handNodes.set(idx, card);
@@ -2384,8 +2437,12 @@ export class TableUI extends Component {
         else this.selected.push(key);
         drawCardBg(card, !on);
         const baseY = this.handBaseY.get(key) ?? 0;   // 两行后基础 y 不再是 0
-        tween(card).to(0.12, { position: new Vec3(card.position.x, baseY + (!on ? 12 : 0), 0) },
-            { easing: 'backOut' }).start();
+        // 【F-11】位置（上移）与缩放（真放大）一起补间，单次 tween 完成。
+        const sc = on ? 1 : TableUI.SEL_SCALE;
+        tween(card).to(0.12, {
+            position: new Vec3(card.position.x, baseY + (on ? 0 : TableUI.SEL_LIFT), 0),
+            scale: new Vec3(sc, sc, 1),
+        }, { easing: 'backOut' }).start();
         // 选中变化会影响按钮文案（"出牌：先选牌" → "出牌"）
         this.renderButtons();
     }
