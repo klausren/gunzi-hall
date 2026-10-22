@@ -52,7 +52,7 @@ export class TableUI extends Component {
     // 这里留 127.0.0.1 表示"本机默认值"：**真机地址一律由 build-wechatgame.ps1 注入**。
     // 不要把某个开发者的局域网 IP 写死在这儿 —— 换 WiFi 就失效，
     // 而且会让"注入没生效"看起来像生效了（构建脚本的产物自检会兜住这一点）。
-    @property serverUrl = 'ws://127.0.0.1:8080/ws';
+    @property serverUrl = 'ws://10.192.4.199:8080/ws';
     @property roomId = 1001;
     @property playerId = 1;
     /**
@@ -203,21 +203,13 @@ export class TableUI extends Component {
     /** 顶栏"主牌+级数+张数"瓦片宽（花色 19 + 级数位+ "N张"区，见 setTopTrumpBadge） */
     private static readonly TRUMP_TILE_W = 78;
 
-    // ---- F-11 选中牌放大（proposal Q4） ----
-    /**
-     * 选中牌的放大倍数。
-     *
-     * <p>为什么用 {@code setScale} 而不是改 {@code UITransform.contentSize}：手牌命中区
-     * 已经被压到 {@code spacing} 宽（约 44，见 layoutHandRow），改 size 必须"子节点连着一起改"
-     * 才不会错位（MEMORY 铁律）；而 scale 是节点级变换，**命中区随节点自动一起放大**，
-     * 不需要同步任何子节点，也不怕点数/花色 Label 走形。
-     *
-     * <p>为什么是 1.18：牌面原生 56×80。两行手牌行距 68，1.18 倍后牌高 ≈94，
-     * 放大约 14 单位 > 行距，会与相邻行轻微交叠——但放大的都是**选中**牌（同一行内至多几张），
-     * 且牌面信息集中在顶部，交叠区是空白牌底，可接受。真机若觉得挤，把这里调小即可。
-     */
+    // ---- 选中牌放大 ----
+    /** 选中牌缩放倍数。用 setScale 而不是改 contentSize：命中区宽度被压到 spacing 了，
+     *  改 size 得连带每个子节点一起改，麻烦且容易漏；setScale 是节点级变换，点数花色那些
+     *  子节点会跟着一起放大，不会走形。两行牌行距 68，1.18 倍牌高 94 会略微压到下一行，
+     *  放大的都是选中的那几张，压住的部分是空白牌底，看着还行。觉得挤就调小这个数。 */
     private static readonly SEL_SCALE = 1.18;
-    /** 选中牌的上移量（配合放大，让抬起感更明显） */
+    /** 选中牌上移量 */
     private static readonly SEL_LIFT = 14;
 
     // 墩牌差量动画状态：座位 → 当前已展示的牌串 / 牌节点
@@ -1357,16 +1349,15 @@ export class TableUI extends Component {
     }
 
     /**
-     * 主牌级数图标（"第N局"后面那个小瓦片）：花色矢量 + 级数数字+ **"N张"计数**。
-     * 等价于原来的「主方块3」，但一眼可读；未定主时整块隐藏（发牌/亮主阶段还没有主牌）。
+     * 主牌级数图标（"第N局"后面那个小瓦片）：花色 + 级数，右侧再跟一个"N张"。
+     * 原来写的是「主方块3」，改成图标一眼能看出来；还没定主时整块不画。
      *
-     * <p>【F-12】右侧的"N张"是**自己手牌里的主牌张数**（proposal Q4）。用手牌而不是全场：
-     *快照只给本人手牌（服务端 snapshotFor(playerId) 的安全设计），这是客户端能拿到的
-     *唯一牌数来源 —— 对"我手上还有几张主牌可用"这个决策来说，也正是玩家真正要问的问题。
-     *判定复用 {@link isTrumpCard}，与服务端 CardTier.isTrump 对齐，不会与服务端算歪。
+     * <p>N张 只数自己手里的主牌，不数全场：服务端只把本人的手牌发过来，客户端
+     * 看不到别人的牌，所以自己手牌是唯一能拿到的数据来源。判定用的是 isTrumpCard，
+     * 和服务端 CardTier.isTrump 一套规则，不会两边算出不一样的数。
      */
     private setTopTrumpBadge(t: { suit: string; level: number } | null): void {
-        // 计数进签名：张数变了要重建瓦片（否则只挪位置、字数不更新）
+        // 张数要进签名，不然张数变了瓦片只挪位置、数字不刷新
         const cnt = t ? this.countTrumpInHand() : 0;
         const sig = t ? `${t.suit}|${t.level}|${cnt}` : '-';
         if (sig === this.trumpBadgeSig) return;
@@ -1385,8 +1376,8 @@ export class TableUI extends Component {
             // 花色 + 级数同色（像真实牌面「梅花4」那样一眼读出主牌与级数）
             if (sym) addSuitIcon(tile, sym, -12, 0, 19, color);
             addTileText(tile, String(t.level), 12, 0, 19, color, 26);
-            // 【F-12】"N张"：细一点、小一点，灰棕色，不与主牌信息抢视觉层级。
-            // 手牌为空（还没发完/已被扣完）时不显示 0，避免"主牌0张"这种看不懂的中间态。
+            // "N张"用小号灰棕色，别跟主牌信息抢眼
+            // 手牌是空的时候不画，免得出现"主牌0张"这种看不懂的东西
             if (cnt > 0) {
                 addTileText(tile, `${cnt}张`, 30, 0, 13,
                     new Color(120, 110, 88, 255), 34);
@@ -1399,10 +1390,8 @@ export class TableUI extends Component {
     }
 
     /**
-     * 【F-12】自己手牌里的主牌张数。
-     *
-     * <p>走 {@link isTrumpCard}（王/级牌/2/主花色），与服务端判定同源；定主前（trump 空）
-     * 返回 0 —— 那时还没有"主"，显示 0 张反而误导。
+     * 自己手里的主牌有几张。用的isTrumpCard（王/级牌/2/主花色），跟服务端一套规则。
+     * 还没定主的时候返回 0，那会儿显示"0张"没意义。
      */
     private countTrumpInHand(): number {
         const hand = this.snap?.yourHand ?? [];
@@ -2388,8 +2377,8 @@ export class TableUI extends Component {
             const key = this.cardKey(hand, idx);
             const selected = this.selected.indexOf(key) >= 0;
             this.handBaseY.set(key, baseY);
-            // 【F-11】选中态：真放大（setScale，命中区随之放大，无需改子节点尺寸）+ 上移。
-            // 快照重排后重建设手时，已选中的牌也按放大态还原，不会退回"只上移"。
+            // 选中的牌放大并上移。快照重排会重建手牌，所以这里也得把选中态还原出来，
+            // 不然重建完就退回没放大的样子了
             const selScale = selected ? TableUI.SEL_SCALE : 1;
             card.setPosition(x, baseY + (selected ? TableUI.SEL_LIFT : 0), 0);
             card.setScale(selScale, selScale, 1);
@@ -2401,8 +2390,7 @@ export class TableUI extends Component {
                 const cut = child.getComponent(UITransform);
                 if (cut) cut.setContentSize(hitW, cut.contentSize.height);
             }
-            // 按压反馈相对"当前是否选中"计算：选中牌按下去是 SEL_SCALE*0.94，
-            // 未选中牌仍是 0.94。TOUCH_START（不是 END）：真机微滑会变 TOUCH_CANCEL。
+            // 按下去要是在选中的牌上，得从放大态往下压，不是从 1 压
             const pressScale = (base: number) => (this.selected.indexOf(key) >= 0 ? base * TableUI.SEL_SCALE : base);
             card.on(Node.EventType.TOUCH_START, () => {
                 tween(card).to(0.08, { scale: new Vec3(pressScale(0.94), pressScale(0.94), 1) },
@@ -2437,7 +2425,7 @@ export class TableUI extends Component {
         else this.selected.push(key);
         drawCardBg(card, !on);
         const baseY = this.handBaseY.get(key) ?? 0;   // 两行后基础 y 不再是 0
-        // 【F-11】位置（上移）与缩放（真放大）一起补间，单次 tween 完成。
+        // 位置和缩放一起补间，一次 tween 就够
         const sc = on ? 1 : TableUI.SEL_SCALE;
         tween(card).to(0.12, {
             position: new Vec3(card.position.x, baseY + (on ? 0 : TableUI.SEL_LIFT), 0),
