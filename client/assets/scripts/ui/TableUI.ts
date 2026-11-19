@@ -204,10 +204,18 @@ export class TableUI extends Component {
     private static readonly TRUMP_TILE_W = 78;
 
     // ---- 选中牌放大 ----
-    /** 选中牌缩放倍数。用 setScale 而不是改 contentSize：命中区宽度被压到 spacing 了，
-     *  改 size 得连带每个子节点一起改，麻烦且容易漏；setScale 是节点级变换，点数花色那些
-     *  子节点会跟着一起放大，不会走形。两行牌行距 68，1.18 倍牌高 94 会略微压到下一行，
-     *  放大的都是选中的那几张，压住的部分是空白牌底，看着还行。觉得挤就调小这个数。 */
+    /**
+     * 选中的牌放大 1.18 倍并抬起 14 个单位。
+     *
+     * 用 setScale 而不是改 UITransform 的 contentSize：手牌命中区宽度被压到
+     * spacing 了，改 size 得把点数、花色这些子节点挨个改一遍，漏一个就错位。
+     * setScale 是整个节点的变换，子节点跟着一起缩，不用管。
+     *
+     * 1.18 这个数是试出来的。牌面本来 56×80，手牌分两行后行距 68，
+     * 放到 1.18 是牌高 94，会压到下一行一点。压住的都是选中的那几张，
+     * 而牌面的字都在上半部分，露出来的下半截是空白牌底，看着还能接受。
+     * 真机上要是觉得挤，把这个数往下调就行。
+     */
     private static readonly SEL_SCALE = 1.18;
     /** 选中牌上移量 */
     private static readonly SEL_LIFT = 14;
@@ -2377,11 +2385,9 @@ export class TableUI extends Component {
             const key = this.cardKey(hand, idx);
             const selected = this.selected.indexOf(key) >= 0;
             this.handBaseY.set(key, baseY);
-            // 选中的牌放大并上移。快照重排会重建手牌，所以这里也得把选中态还原出来，
-            // 不然重建完就退回没放大的样子了
-            const selScale = selected ? TableUI.SEL_SCALE : 1;
-            card.setPosition(x, baseY + (selected ? TableUI.SEL_LIFT : 0), 0);
-            card.setScale(selScale, selScale, 1);
+            // 选中的牌要放大并抬起。快照重排会把手牌整个重建一遍，
+            // 所以重建时也得把选中态摆回去，不然重建完牌就不放大了
+            this.applySelectedLook(card, key, baseY, selected);
             if (selected) drawCardBg(card, true);
             // 命中区缩到 spacing 宽，子节点必须一起缩（见 MEMORY 铁律）
             const hitW = Math.min(spacing, cardW);
@@ -2390,25 +2396,44 @@ export class TableUI extends Component {
                 const cut = child.getComponent(UITransform);
                 if (cut) cut.setContentSize(hitW, cut.contentSize.height);
             }
-            // 按下去要是在选中的牌上，得从放大态往下压，不是从 1 压
-            const pressScale = (base: number) => (this.selected.indexOf(key) >= 0 ? base * TableUI.SEL_SCALE : base);
+            // 按下去的时候得看这张牌现在是不是选中的：选中的要从放大态往下压，
+            // 没选中的从 1 压
+            const press = this.pressScaleOf(key);
             card.on(Node.EventType.TOUCH_START, () => {
-                tween(card).to(0.08, { scale: new Vec3(pressScale(0.94), pressScale(0.94), 1) },
+                tween(card).to(0.08, { scale: new Vec3(press(0.94), press(0.94), 1) },
                     { easing: 'quadOut' }).start();
                 this.toggleSelect(key, card);
             });
             card.on(Node.EventType.TOUCH_END, () => {
-                tween(card).to(0.12, { scale: new Vec3(pressScale(1), pressScale(1), 1) },
+                tween(card).to(0.12, { scale: new Vec3(press(1), press(1), 1) },
                     { easing: 'backOut' }).start();
             });
             card.on(Node.EventType.TOUCH_CANCEL, () => {
-                tween(card).to(0.12, { scale: new Vec3(pressScale(1), pressScale(1), 1) },
+                tween(card).to(0.12, { scale: new Vec3(press(1), press(1), 1) },
                     { easing: 'backOut' }).start();
             });
             this.handNode.addChild(card);
             this.handNodes.set(idx, card);
             x += spacing;
         }
+    }
+
+    /**
+     * 把一张牌摆成「选中」或「没选中」的样子。
+     *
+     * 拆成单独一个方法是因为选中态有两处要用：重建手牌时直接摆好，
+     * 以及点选时补间过去。两处各写一遍的话，缩放系数和抬起高度迟早会对不上。
+     */
+    private applySelectedLook(card: Node, key: string, baseY: number, on: boolean): void {
+        const s = on ? TableUI.SEL_SCALE : 1;
+        card.setPosition(card.position.x, baseY + (on ? TableUI.SEL_LIFT : 0), 0);
+        card.setScale(s, s, 1);
+    }
+
+    /** 按压时的缩放系数：选中的牌从放大态往下压，没选中的从 1 压 */
+    private pressScaleOf(key: string): (base: number) => number {
+        const on = this.selected.indexOf(key) >= 0;
+        return (base: number) => (on ? base * TableUI.SEL_SCALE : base);
     }
 
     /** 选中/取消选中一张牌：只动这一张节点（弹起 + 金框），不重建整手。
@@ -2434,7 +2459,6 @@ export class TableUI extends Component {
         // 选中变化会影响按钮文案（"出牌：先选牌" → "出牌"）
         this.renderButtons();
     }
-
     // ==================== 手牌排序（主牌一堆 + 副牌按花色分堆） ====================
 
     /** 服务端花色名 → 牌编码首字符 */
